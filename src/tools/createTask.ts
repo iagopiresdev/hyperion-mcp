@@ -1,9 +1,10 @@
 import { db } from "../db/memory";
+import { registerTool } from "../registry";
 import type { MCPToolResponse } from "../types/mcp";
 
 /**
  * Create task tool implementation
- * Creates a new task with the given parameters
+ * Creates a new task with the specified parameters
  */
 export async function createTask(
   params: Record<string, any>
@@ -17,14 +18,14 @@ export async function createTask(
       throw new Error("Due date must be in YYYY-MM-DD format");
     }
 
-    const task = db.createTask({
+    const newTask = db.createTask({
       title: params.title,
       description: params.description,
       dueDate: params.dueDate,
     });
 
     return {
-      content: task,
+      content: newTask,
       metadata: {
         timestamp: new Date().toISOString(),
       },
@@ -34,3 +35,33 @@ export async function createTask(
     throw new Error(`Failed to create task: ${(error as Error).message}`);
   }
 }
+
+// Register the tool with the registry
+registerTool(
+  "create_task",
+  "Create a new task",
+  {
+    type: "object",
+    properties: {
+      title: {
+        type: "string",
+        description: "The title of the task",
+      },
+      description: {
+        type: "string",
+        description: "A detailed description of the task",
+      },
+      dueDate: {
+        type: "string",
+        description: "The due date of the task in ISO format (YYYY-MM-DD)",
+        format: "date",
+      },
+    },
+    required: ["title"],
+  },
+  createTask,
+  {
+    category: "tasks",
+    tags: ["write", "create"],
+  }
+);

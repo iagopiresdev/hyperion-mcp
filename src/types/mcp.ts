@@ -35,6 +35,7 @@ export interface MCPTool {
 export interface MCPToolRequest {
   name: string;
   parameters: Record<string, any>;
+  stream?: boolean;
 }
 
 /**
@@ -69,4 +70,57 @@ export interface MCPServerInfo {
   description: string;
   tools: MCPTool[];
   resources?: MCPResource[];
+  // Additional fields
+  vendor?: string;
+  contact?: string;
+  specs?: {
+    mcp: string;
+    [key: string]: string;
+  };
+}
+
+/**
+ * Tool Handler Function
+ * Function signature for tool implementation handlers
+ */
+export type ToolHandler = (
+  parameters: Record<string, any>
+) => Promise<MCPToolResponse>;
+
+/**
+ * Tool Registration Options
+ * Configuration options when registering a new tool
+ */
+export interface ToolRegistrationOptions {
+  name: string;
+  description: string;
+  parameters: {
+    type: "object";
+    properties: Record<
+      string,
+      {
+        type: string;
+        description: string;
+        [key: string]: any;
+      }
+    >;
+    required?: string[];
+  };
+  handler: ToolHandler;
+  tags?: string[];
+  category?: string;
+  enabled?: boolean;
+}
+
+/**
+ * Tool Registry
+ * Interface for a registry that manages tool registrations
+ */
+export interface ToolRegistry {
+  register(options: ToolRegistrationOptions): void;
+  unregister(name: string): boolean;
+  getToolHandler(name: string): ToolHandler | undefined;
+  getToolDefinition(name: string): MCPTool | undefined;
+  getAllTools(): MCPTool[];
+  isToolRegistered(name: string): boolean;
 }

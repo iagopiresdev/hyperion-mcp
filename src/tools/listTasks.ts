@@ -1,4 +1,5 @@
 import { db } from "../db/memory";
+import { registerTool } from "../registry";
 import type { MCPToolResponse } from "../types/mcp";
 
 /**
@@ -29,3 +30,25 @@ export async function listTasks(
     throw new Error(`Failed to list tasks: ${(error as Error).message}`);
   }
 }
+
+// Register the tool with the registry
+registerTool(
+  "list_tasks",
+  "List all tasks or filter by status",
+  {
+    type: "object",
+    properties: {
+      status: {
+        type: "string",
+        description: "Filter tasks by status (all, completed, active)",
+        enum: ["all", "completed", "active"],
+      },
+    },
+    required: [],
+  },
+  listTasks,
+  {
+    category: "tasks",
+    tags: ["read", "query", "list"],
+  }
+);
