@@ -4,22 +4,25 @@ import { cors } from "hono/cors";
 import { z } from "zod";
 import { executeTool, toolRegistry } from "./registry";
 import type { MCPServerInfo, MCPToolRequest } from "./types/mcp";
+import { config } from "./utils/config";
+import { logger } from "./utils/logger";
 
-// Import tools to ensure they're registered
+// Tools
 import "./tools/completeTask";
 import "./tools/createTask";
-import "./tools/listTasks";
-// Import example streaming tool
 import "./tools/example/slowTask";
+import "./tools/listTasks";
+import "./tools/llmQuery/openaiQuery";
 
-// Define custom Context type for the app
 type AppContext = {
   requestStartTime?: number;
+  requestId?: string;
 };
+
+const serverLogger = logger.child({ component: "server" });
 
 const app = new Hono<{ Variables: AppContext }>();
 
-// Apply CORS middleware
 app.use(
   "*",
   cors({
@@ -30,7 +33,6 @@ app.use(
   })
 );
 
-// Schema validation for tool requests
 const toolRequestSchema = z.object({
   name: z.string().min(1, "Tool name is required"),
   parameters: z.record(z.any()).optional().default({}),
@@ -50,48 +52,81 @@ const getServerInfo = (): MCPServerInfo => ({
   tools: toolRegistry.getAllTools(),
 });
 
-// Tracking request start times for observability
 app.use("*", async (c, next) => {
+  const requestId = crypto.randomUUID();
+  c.set("requestId", requestId);
   c.set("requestStartTime", Date.now());
-  await next();
-  const duration = Date.now() - (c.get("requestStartTime") || 0);
-  console.log(
-    `${c.req.method} ${c.req.path} - ${c.res.status} (${duration}ms)`
-  );
+
+  const requestLogger = serverLogger.child({
+    requestId,
+    method: c.req.method,
+    path: c.req.path,
+  });
+
+  requestLogger.info("Request started");
+
+  try {
+    await next();
+
+    const duration = Date.now() - (c.get("requestStartTime") || 0);
+    requestLogger.info("Request completed", {
+      status: c.res.status,
+      duration: `${duration}ms`,
+    });
+  } catch (error) {
+    const duration = Date.now() - (c.get("requestStartTime") || 0);
+    requestLogger.error("Request failed", error as Error, {
+      status: 500,
+      duration: `${duration}ms`,
+    });
+
+    throw error;
+  }
 });
 
-// Server info endpoint
 app.get("/", (c) => {
+  serverLogger.debug("Server info requested");
   return c.json(getServerInfo());
 });
 
-// Tool execution endpoint
 app.post("/tools", zValidator("json", toolRequestSchema), async (c) => {
   const request = c.req.valid("json") as MCPToolRequest;
   const { name, parameters, stream } = request;
+  const requestId = c.get("requestId");
 
-  // Check if tool exists
+  const toolLogger = serverLogger.child({
+    tool: name,
+    requestId,
+    streaming: stream,
+  });
+
   if (!toolRegistry.isToolRegistered(name)) {
+    const availableTools = toolRegistry.getAllTools().map((t) => t.name);
+    toolLogger.warn("Unknown tool requested", { availableTools });
+
     return c.json(
       {
         error: `Unknown tool: ${name}`,
-        availableTools: toolRegistry.getAllTools().map((t) => t.name),
+        availableTools,
       },
       400
     );
   }
 
-  // For streaming responses
+  toolLogger.info("Tool execution started", { parameters });
+
   if (stream) {
-    return streamToolResponse(c, name, parameters);
+    toolLogger.debug("Using streaming response");
+    return streamToolResponse(c, name, parameters, toolLogger);
   }
 
   try {
-    // Execute the tool
     const response = await executeTool(name, parameters);
+    toolLogger.info("Tool execution completed successfully");
+
     return c.json(response);
   } catch (error) {
-    console.error(`Error executing tool ${name}:`, error);
+    toolLogger.error("Tool execution failed", error as Error);
 
     return c.json(
       {
@@ -106,25 +141,22 @@ app.post("/tools", zValidator("json", toolRequestSchema), async (c) => {
   }
 });
 
-// Function to handle streaming responses
 async function streamToolResponse(
   c: any,
   toolName: string,
-  parameters: Record<string, any>
+  parameters: Record<string, any>,
+  logger: any
 ) {
   const encoder = new TextEncoder();
   let isClosed = false;
 
-  // Create a TransformStream for streaming the response
   const stream = new TransformStream({
     start(controller) {
       setTimeout(() => {
         if (isClosed) return;
 
-        // Execute the tool with streaming support
         executeTool(toolName, parameters, controller).catch((error) => {
-          console.error(`Error in streaming execution of ${toolName}:`, error);
-          // Error handling is done inside executeTool
+          logger.error(`Streaming execution failed`, error as Error);
         });
       }, 0);
     },
@@ -139,20 +171,20 @@ async function streamToolResponse(
   });
 }
 
-// Health check endpoint
 app.get("/health", (c) => {
+  serverLogger.debug("Health check requested");
   return c.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Registry management endpoints
 app.get("/tools", (c) => {
+  serverLogger.debug("Tools list requested");
   return c.json({
     tools: toolRegistry.getAllTools(),
   });
 });
 
-// Live API documentation
 app.get("/docs", (c) => {
+  serverLogger.debug("Documentation requested");
   const serverInfo = getServerInfo();
   return c.html(`
     <!DOCTYPE html>
@@ -198,8 +230,12 @@ app.get("/docs", (c) => {
   `);
 });
 
-const port = process.env.PORT || 3333;
-console.log(`hyperion-mcp server starting on http://localhost:${port}`);
+const port = config.server.port;
+serverLogger.info(`Server starting on http://localhost:${port}`, {
+  port,
+  environment: config.server.environment,
+  tools: toolRegistry.getAllTools().length,
+});
 
 export default {
   port,

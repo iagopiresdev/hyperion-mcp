@@ -1,8 +1,7 @@
-// https://modelcontextprotocol.io/quickstart/server
-
 /**
  * MCP Tool Definition
  * Describes a tool capability that an MCP server provides
+ * https://modelcontextprotocol.io/quickstart/server
  */
 export interface MCPTool {
   // The name of the tool, used when calling it
