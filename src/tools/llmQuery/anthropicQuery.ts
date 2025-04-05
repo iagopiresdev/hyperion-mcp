@@ -25,6 +25,10 @@ interface AnthropicCompletionParams {
   top_k?: number;
   stream?: boolean;
   metadata?: Record<string, any>; // Optional user metadata
+  tool_choice?: {
+    type: "auto" | "any" | "tool";
+    name?: string;
+  };
 }
 
 /**
@@ -82,6 +86,7 @@ async function handleNonStreaming(
       top_k: params.top_k,
       metadata: params.metadata,
       stream: false,
+      tool_choice: params.tool_choice,
     };
 
     llmLogger.info("Sending request to Anthropic", {
@@ -280,6 +285,7 @@ export async function anthropicQueryHandler(
       top_k: params.top_k,
       metadata: params.metadata,
       stream: true,
+      tool_choice: params.tool_choice,
     };
 
     llmLogger.info("Sending streaming request to Anthropic", {
@@ -363,6 +369,16 @@ registerTool(
         type: "object",
         description: "Optional key-value metadata (e.g., user_id)",
         additionalProperties: true,
+      },
+      tool_choice: {
+        type: "object",
+        description:
+          "How the model should use tools (if tools are provided elsewhere). 'auto', 'any', or {'type': 'tool', 'name': 'tool_name'}",
+        properties: {
+          type: { type: "string", enum: ["auto", "any", "tool"] },
+          name: { type: "string" },
+        },
+        required: ["type"],
       },
     },
     required: ["prompt"],

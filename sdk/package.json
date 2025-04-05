@@ -1,0 +1,38 @@
+{
+  "name": "@hyperion-mcp/client",
+  "version": "0.0.1",
+  "description": "Client SDK for interacting with a hyperion-mcp server.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "hyperion",
+    "ai",
+    "client",
+    "sdk"
+  ],
+  "author": "Hyperion MCP Contributors",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "zod": "^3.20.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-repo/hyperion-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-repo/hyperion-mcp/issues"
+  },
+  "homepage": "https://github.com/your-repo/hyperion-mcp#readme"
+}
