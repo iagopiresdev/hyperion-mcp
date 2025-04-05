@@ -3,6 +3,8 @@
  * Describes a tool capability that an MCP server provides
  * https://modelcontextprotocol.io/quickstart/server
  */
+import type { PermissionLevel } from "../utils/auth";
+
 export interface MCPTool {
   // The name of the tool, used when calling it
   name: string;
@@ -25,6 +27,13 @@ export interface MCPTool {
     >;
     required?: string[];
   };
+
+  // The permission level required to use this tool
+  permissionLevel?: PermissionLevel;
+
+  // Additional metadata
+  category?: string;
+  tags?: string[];
 }
 
 /**
@@ -106,6 +115,7 @@ export interface ToolRegistrationOptions {
     required?: string[];
   };
   handler: ToolHandler;
+  permissionLevel?: PermissionLevel;
   tags?: string[];
   category?: string;
   enabled?: boolean;

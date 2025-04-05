@@ -31,7 +31,6 @@ export async function listTasks(
   }
 }
 
-// Register the tool with the registry
 registerTool(
   "list_tasks",
   "List all tasks or filter by status",

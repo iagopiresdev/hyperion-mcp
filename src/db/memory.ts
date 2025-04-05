@@ -82,4 +82,9 @@ export const db = {
     tasks.splice(index, 1);
     return true;
   },
+
+  // Intended for testing purposes
+  _resetTasks: () => {
+    tasks = []; // Reset to an empty array
+  },
 };

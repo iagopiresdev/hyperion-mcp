@@ -13,12 +13,19 @@ interface ServerConfig {
   logLevel: "debug" | "info" | "warn" | "error";
 }
 
+interface AuthConfig {
+  enabled: boolean;
+  enableAuth: boolean;
+  apiKeys: string[];
+}
+
 interface ApiKeys {
   openai?: string;
 }
 
 interface Config {
   server: ServerConfig;
+  auth: AuthConfig;
   apiKeys: ApiKeys;
 }
 
@@ -26,6 +33,14 @@ function parseNumber(value: string | undefined, defaultValue: number): number {
   if (!value) return defaultValue;
   const parsed = parseInt(value, 10);
   return isNaN(parsed) ? defaultValue : parsed;
+}
+
+function parseBoolean(
+  value: string | undefined,
+  defaultValue: boolean
+): boolean {
+  if (value === undefined) return defaultValue;
+  return value.toLowerCase() === "true" || value === "1";
 }
 
 function createConfig(): Config {
@@ -52,6 +67,22 @@ function createConfig(): Config {
     );
   }
 
+  const authEnabled = parseBoolean(
+    process.env.ENABLE_AUTH,
+    environment === "production"
+  );
+
+  const apiKeys: string[] = [];
+  if (process.env.API_KEY) {
+    apiKeys.push(process.env.API_KEY);
+    configLogger.debug("API_KEY loaded from environment");
+  }
+
+  if (process.env.MCP_API_KEY) {
+    apiKeys.push(process.env.MCP_API_KEY);
+    configLogger.debug("MCP_API_KEY loaded from environment");
+  }
+
   const openaiApiKey = process.env.OPENAI_API_KEY;
   if (environment !== "test" && !openaiApiKey) {
     configLogger.warn(
@@ -64,6 +95,11 @@ function createConfig(): Config {
       port,
       environment,
       logLevel,
+    },
+    auth: {
+      enabled: authEnabled,
+      enableAuth: authEnabled,
+      apiKeys,
     },
     apiKeys: {
       openai: openaiApiKey,

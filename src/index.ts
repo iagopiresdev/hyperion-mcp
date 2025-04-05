@@ -1,8 +1,20 @@
+import { serve } from "@hono/node-server";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { prettyJSON } from "hono/pretty-json";
 import { z } from "zod";
-import { executeTool, toolRegistry } from "./registry";
+import { executeStreamedTool, executeTool } from "./handlers/executeTool";
+import { notFound } from "./handlers/notFound";
+import type { AuthContext } from "./middleware/auth";
+import { authentication, toolAuthorization } from "./middleware/auth";
+import {
+  metricsHandler,
+  requestMetrics,
+  toolMetrics,
+} from "./middleware/metrics";
+import { executeTool as executeToolFunction, toolRegistry } from "./registry";
+import { registerToolsFromDirectory } from "./registry/toolLoader";
 import type { MCPServerInfo, MCPToolRequest } from "./types/mcp";
 import { config } from "./utils/config";
 import { logger } from "./utils/logger";
@@ -17,21 +29,38 @@ import "./tools/llmQuery/openaiQuery";
 type AppContext = {
   requestStartTime?: number;
   requestId?: string;
-};
+} & AuthContext;
 
 const serverLogger = logger.child({ component: "server" });
 
-const app = new Hono<{ Variables: AppContext }>();
+export const app = new Hono<{ Variables: AppContext }>();
 
+app.use("*", async (c, next) => {
+  await next();
+  serverLogger.debug(`${c.req.method} ${c.req.path} - ${c.res.status}`);
+});
+app.use("*", prettyJSON());
 app.use(
   "*",
   cors({
     origin: "*",
-    allowHeaders: ["Content-Type", "Authorization"],
-    allowMethods: ["GET", "POST", "OPTIONS"],
-    maxAge: 86400,
+    allowHeaders: ["Content-Type", "Authorization", "X-API-Key"],
+    allowMethods: ["POST", "GET", "OPTIONS"],
+    exposeHeaders: ["Content-Type"],
+    maxAge: 600,
+    credentials: true,
   })
 );
+
+app.use("*", requestMetrics);
+if (config.auth.enableAuth) {
+  app.use("*", authentication);
+}
+
+app.use("*", toolAuthorization);
+
+app.use("/tools/*", toolMetrics);
+app.use("/stream/tools/*", toolMetrics);
 
 const toolRequestSchema = z.object({
   name: z.string().min(1, "Tool name is required"),
@@ -43,7 +72,7 @@ const getServerInfo = (): MCPServerInfo => ({
   name: "hyperion-mcp",
   version: "0.1.0",
   description:
-    "High-performance Model Context Protocol (MCP) server built with Bun and Hono",
+    "High-performance Model Context Protocol (MCP) server built with Node.js and Hono",
   vendor: "hyperion-mcp",
   contact: "https://github.com/your-username/hyperion-mcp",
   specs: {
@@ -121,7 +150,7 @@ app.post("/tools", zValidator("json", toolRequestSchema), async (c) => {
   }
 
   try {
-    const response = await executeTool(name, parameters);
+    const response = await executeToolFunction(name, parameters);
     toolLogger.info("Tool execution completed successfully");
 
     return c.json(response);
@@ -155,7 +184,7 @@ async function streamToolResponse(
       setTimeout(() => {
         if (isClosed) return;
 
-        executeTool(toolName, parameters, controller).catch((error) => {
+        executeToolFunction(toolName, parameters, controller).catch((error) => {
           logger.error(`Streaming execution failed`, error as Error);
         });
       }, 0);
@@ -230,14 +259,28 @@ app.get("/docs", (c) => {
   `);
 });
 
-const port = config.server.port;
-serverLogger.info(`Server starting on http://localhost:${port}`, {
-  port,
-  environment: config.server.environment,
-  tools: toolRegistry.getAllTools().length,
-});
+app.get("/metrics", metricsHandler);
 
-export default {
-  port,
-  fetch: app.fetch,
-};
+app.post("/tools/:tool", toolAuthorization, executeTool);
+app.post("/stream/tools/:tool", toolAuthorization, executeStreamedTool);
+
+app.notFound(notFound);
+
+if (import.meta.main) {
+  registerToolsFromDirectory("./src/tools")
+    .then((count: number) => {
+      serverLogger.info(`Loaded ${count} tools from directory`);
+
+      const port = config.server.port;
+      console.log(`Server is running on port ${port}`);
+
+      serve({
+        fetch: app.fetch,
+        port,
+      });
+    })
+    .catch((error: Error) => {
+      serverLogger.error("Failed to load tools:", error);
+      process.exit(1);
+    });
+}

@@ -131,21 +131,17 @@ export function createStreamingHandler(
       return handler(params);
     }
 
-    // Create a streaming response object
+    // Creates a streaming response object
     const streamingResponse = new StreamingToolResponse(stream);
 
     try {
-      // Execute the handler and get the final result
       const result = await handler(params);
-
-      // Return the complete result
       streamingResponse.complete(result.content, result.metadata);
 
       // The actual return value won't be used in streaming mode,
       // but we need to return something to satisfy the type system
       return result;
     } catch (error) {
-      // Handle errors in the streaming context
       streamingResponse.error(error as Error);
 
       // Rethrow to be consistent with non-streaming behavior

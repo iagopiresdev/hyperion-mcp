@@ -4,6 +4,7 @@ import type {
   ToolRegistrationOptions,
   ToolRegistry,
 } from "../types/mcp";
+import type { PermissionLevel } from "../utils/auth";
 
 /**
  * In-memory implementation of the ToolRegistry interface
@@ -22,10 +23,10 @@ export class InMemoryToolRegistry implements ToolRegistry {
       throw new Error(`Tool with name '${options.name}' is already registered`);
     }
 
-    // Set default enabled status if not provided
     const registrationOptions = {
       ...options,
-      enabled: options.enabled !== false, // Default to true unless explicitly false
+      enabled: options.enabled !== false,
+      permissionLevel: options.permissionLevel || "public",
     };
 
     this.tools.set(options.name, registrationOptions);
@@ -65,6 +66,9 @@ export class InMemoryToolRegistry implements ToolRegistry {
       name: tool.name,
       description: tool.description,
       parameters: tool.parameters,
+      permissionLevel: tool.permissionLevel || "public",
+      category: tool.category,
+      tags: tool.tags,
     };
   }
 
@@ -81,6 +85,36 @@ export class InMemoryToolRegistry implements ToolRegistry {
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters,
+          permissionLevel: tool.permissionLevel || "public",
+          category: tool.category,
+          tags: tool.tags,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Get all registered and enabled tools with the specified permission level
+   * @param permissionLevel The permission level to filter by
+   * @returns Array of tool definitions for the specified permission level
+   */
+  getToolsByPermission(permissionLevel: PermissionLevel): MCPTool[] {
+    const result: MCPTool[] = [];
+
+    for (const [_, tool] of this.tools.entries()) {
+      if (
+        tool.enabled &&
+        (tool.permissionLevel || "public") === permissionLevel
+      ) {
+        result.push({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+          permissionLevel: tool.permissionLevel || "public",
+          category: tool.category,
+          tags: tool.tags,
         });
       }
     }
@@ -144,6 +178,9 @@ export class InMemoryToolRegistry implements ToolRegistry {
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters,
+          permissionLevel: tool.permissionLevel || "public",
+          category: tool.category,
+          tags: tool.tags,
         });
       }
     }
@@ -165,6 +202,9 @@ export class InMemoryToolRegistry implements ToolRegistry {
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters,
+          permissionLevel: tool.permissionLevel || "public",
+          category: tool.category,
+          tags: tool.tags,
         });
       }
     }

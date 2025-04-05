@@ -1,6 +1,9 @@
 import { db } from "../db/memory";
 import { registerTool } from "../registry";
 import type { MCPToolResponse } from "../types/mcp";
+import { logger } from "../utils/logger";
+
+const toolLogger = logger.child({ tool: "create_task" });
 
 /**
  * Create task tool implementation
@@ -31,12 +34,17 @@ export async function createTask(
       },
     };
   } catch (error) {
-    console.error("Error creating task:", error);
+    if (process.env.NODE_ENV !== "test") {
+      toolLogger.error(
+        `Failed to create task with params: ${JSON.stringify(params)}. Error: ${
+          (error as Error).message
+        }`
+      );
+    }
     throw new Error(`Failed to create task: ${(error as Error).message}`);
   }
 }
 
-// Register the tool with the registry
 registerTool(
   "create_task",
   "Create a new task",

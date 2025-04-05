@@ -1,13 +1,10 @@
 import type { MCPToolResponse } from "../types/mcp";
 import { InMemoryToolRegistry } from "./toolRegistry";
 
-// Create a global shared instance of the tool registry
+// Creates a global shared instance of the tool registry
 export const toolRegistry = new InMemoryToolRegistry();
-
-// Re-export the tool registry implementation
 export { InMemoryToolRegistry } from "./toolRegistry";
 
-// Convenience function to register a tool
 export function registerTool(
   name: string,
   description: string,
@@ -28,7 +25,6 @@ export function registerTool(
   });
 }
 
-// Convenience function to execute a tool by name
 export async function executeTool(
   name: string,
   parameters: Record<string, any>,
