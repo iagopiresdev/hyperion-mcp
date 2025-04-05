@@ -26,6 +26,31 @@ hyperion-mcp is a high-performance implementation of the Model Context Protocol 
 - 📊 **Built-in Observability**: Metrics and logging from the start
 - ☁️ **Edge-Ready**: Optimized for edge computing environments
 
+## Available Tools
+
+hyperion-mcp comes with a set of pre-built tools:
+
+**Task Management:**
+
+- `create_task`: Create a new task.
+- `list_tasks`: List tasks, optionally filtering by status (all, completed, active).
+- `complete_task`: Mark a task as completed by its ID.
+
+**LLM Query:**
+
+- `openai_query`: Query OpenAI models (e.g., GPT-3.5, GPT-4) with support for various parameters and streaming.
+- `anthropic_query`: Query Anthropic (Claude) models via the Messages API, supporting streaming and various parameters.
+
+**Connectors:**
+
+- `github_list_issues`: List issues for a specified GitHub repository, with filtering options.
+
+**Examples:**
+
+- `slow_task`: A demo tool that processes items slowly, showcasing streaming progress updates.
+
+_(More tools and connectors are planned!)_
+
 ## Why JavaScript/TypeScript?
 
 While there are many languages suitable for building high-performance servers (Rust, Go, etc.), we chose TypeScript for hyperion-mcp for several strategic reasons:

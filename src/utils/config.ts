@@ -22,6 +22,7 @@ interface AuthConfig {
 interface ApiKeys {
   openai?: string;
   anthropic?: string;
+  github?: string;
 }
 
 interface Config {
@@ -86,6 +87,7 @@ function createConfig(): Config {
 
   const openaiApiKey = process.env.OPENAI_API_KEY;
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+  const githubToken = process.env.GITHUB_TOKEN;
 
   if (environment !== "test" && !openaiApiKey) {
     configLogger.warn(
@@ -113,6 +115,7 @@ function createConfig(): Config {
     apiKeys: {
       openai: openaiApiKey,
       anthropic: anthropicApiKey,
+      github: githubToken,
     },
   };
 
