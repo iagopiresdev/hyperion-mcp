@@ -21,6 +21,7 @@ interface AuthConfig {
 
 interface ApiKeys {
   openai?: string;
+  anthropic?: string;
 }
 
 interface Config {
@@ -84,9 +85,17 @@ function createConfig(): Config {
   }
 
   const openaiApiKey = process.env.OPENAI_API_KEY;
+  const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+
   if (environment !== "test" && !openaiApiKey) {
     configLogger.warn(
       "OPENAI_API_KEY not set, OpenAI tools will not work correctly"
+    );
+  }
+
+  if (environment !== "test" && !anthropicApiKey) {
+    configLogger.warn(
+      "ANTHROPIC_API_KEY not set, Anthropic tools will not work correctly"
     );
   }
 
@@ -103,6 +112,7 @@ function createConfig(): Config {
     },
     apiKeys: {
       openai: openaiApiKey,
+      anthropic: anthropicApiKey,
     },
   };
 
