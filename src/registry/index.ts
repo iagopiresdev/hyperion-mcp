@@ -1,4 +1,5 @@
 import type { MCPToolResponse } from "../types/mcp";
+import type { PermissionLevel } from "../utils/auth";
 import { InMemoryToolRegistry } from "./toolRegistry";
 
 // Creates a global shared instance of the tool registry
@@ -10,6 +11,7 @@ export function registerTool(
   description: string,
   parameters: any,
   handler: (params: Record<string, any>) => Promise<MCPToolResponse>,
+  permissionLevel?: PermissionLevel,
   options?: {
     tags?: string[];
     category?: string;
@@ -21,6 +23,7 @@ export function registerTool(
     description,
     parameters,
     handler,
+    permissionLevel,
     ...options,
   });
 }

@@ -29,6 +29,9 @@ interface Config {
   server: ServerConfig;
   auth: AuthConfig;
   apiKeys: ApiKeys;
+  fsTool: {
+    basePath: string;
+  };
 }
 
 function parseNumber(value: string | undefined, defaultValue: number): number {
@@ -116,6 +119,9 @@ function createConfig(): Config {
       openai: openaiApiKey,
       anthropic: anthropicApiKey,
       github: githubToken,
+    },
+    fsTool: {
+      basePath: process.env.FS_TOOL_BASE_PATH || "./fs_sandbox",
     },
   };
 

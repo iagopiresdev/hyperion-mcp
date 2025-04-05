@@ -24,6 +24,8 @@ import { logger } from "./src/utils/logger";
 
 // Tools
 import "./src/tools/completeTask";
+import "./src/tools/connectors/fileSystem";
+import "./src/tools/connectors/webBrowser";
 import "./src/tools/createTask";
 import "./src/tools/example/slowTask";
 import "./src/tools/listTasks";
