@@ -1,3 +1,5 @@
+// TODO: This is a temporary solution, we need to add a proper authentication system
+
 import { config } from "./config";
 import { logger } from "./logger";
 
@@ -70,10 +72,8 @@ class ApiKeyStore {
         }
       }
 
-      // In a real application, you would load additional keys from a database
-      // For now, we'll add some test keys for development purposes
+      // For Production, we would load additional keys from the database
       if (config.server.environment === "development") {
-        // Add test keys for development
         this.registerKey("test-public-key", {
           id: "test-public",
           name: "Test Public Client",
@@ -231,8 +231,8 @@ export class AuthService {
     }
 
     if (method === "bearer_token") {
-      // For now, treat bearer tokens the same as API keys
-      // In a real application, you would validate JWT tokens or OAuth tokens
+      // For now, treats bearer tokens the same as API keys
+      // In Production, we will validate JWT tokens or OAuth tokens
       const client = this.apiKeys.validateKey(credentials);
       if (client) {
         authLogger.debug("Authenticated via Bearer token", {
@@ -260,15 +260,12 @@ export class AuthService {
   ): boolean {
     if (!client) return false;
 
-    // Admin clients have access to everything
     if (client.permissions === "admin") return true;
 
-    // Protected clients have access to protected and public resources
     if (client.permissions === "protected") {
       return requiredLevel === "protected" || requiredLevel === "public";
     }
 
-    // Public clients only have access to public resources
     if (client.permissions === "public") {
       return requiredLevel === "public";
     }
@@ -294,5 +291,5 @@ export class AuthService {
   }
 }
 
-// Export a singleton instance of the auth service
+// Creates a singleton instance of the auth service
 export const authService = new AuthService();
