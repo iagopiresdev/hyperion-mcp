@@ -106,7 +106,11 @@ async function handleNonStreaming(
       },
     };
   } catch (error) {
-    llmLogger.error("Error querying OpenAI", error as Error);
+    // Only log if not in test environment
+    if (process.env.NODE_ENV !== "test") {
+      llmLogger.error("Error querying OpenAI", error as Error);
+    }
+    // Always re-throw
     throw error;
   }
 }
@@ -196,7 +200,7 @@ async function processStream(
 /**
  * Handle OpenAI query with streaming support
  */
-async function openAIQueryHandler(
+export async function openAIQueryHandler(
   params: Record<string, any>,
   controller?: TransformStreamDefaultController
 ): Promise<MCPToolResponse> {

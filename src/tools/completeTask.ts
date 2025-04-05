@@ -1,6 +1,9 @@
 import { db } from "../db/memory";
 import { registerTool } from "../registry";
 import type { MCPToolResponse } from "../types/mcp";
+import { logger } from "../utils/logger";
+
+const toolLogger = logger.child({ tool: "complete_task" });
 
 /**
  * Complete task tool implementation
@@ -27,7 +30,13 @@ export async function completeTask(
       },
     };
   } catch (error) {
-    console.error("Error completing task:", error);
+    if (process.env.NODE_ENV !== "test") {
+      toolLogger.error(
+        `Failed to complete task with params: ${JSON.stringify(
+          params
+        )}. Error: ${(error as Error).message}`
+      );
+    }
     throw new Error(`Failed to complete task: ${(error as Error).message}`);
   }
 }

@@ -1,6 +1,9 @@
 import { db } from "../db/memory";
 import { registerTool } from "../registry";
 import type { MCPToolResponse } from "../types/mcp";
+import { logger } from "../utils/logger";
+
+const toolLogger = logger.child({ tool: "list_tasks" });
 
 /**
  * List tasks tool implementation
@@ -26,7 +29,13 @@ export async function listTasks(
       },
     };
   } catch (error) {
-    console.error("Error listing tasks:", error);
+    if (process.env.NODE_ENV !== "test") {
+      toolLogger.error(
+        `Failed to list tasks with params: ${JSON.stringify(params)}. Error: ${
+          (error as Error).message
+        }`
+      );
+    }
     throw new Error(`Failed to list tasks: ${(error as Error).message}`);
   }
 }

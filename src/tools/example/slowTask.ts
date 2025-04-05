@@ -48,7 +48,7 @@ async function slowTaskHandler(
 /**
  * Streaming version that returns results incrementally
  */
-async function slowTaskStreamingHandler(
+export async function slowTaskStreamingHandler(
   params: Record<string, any>,
   controller?: TransformStreamDefaultController
 ): Promise<MCPToolResponse> {
