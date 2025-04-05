@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { app } from "../src/index";
+import { app } from "../index";
 
 describe("Server Endpoints", () => {
   it("GET / should return server info", async () => {
