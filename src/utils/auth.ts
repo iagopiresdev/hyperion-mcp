@@ -1,9 +1,11 @@
-// TODO: This is a temporary solution, we need to add a proper authentication system
-
+import * as bcrypt from "bcrypt";
 import { config } from "./config";
 import { logger } from "./logger";
+import { supabase } from "./supabaseClient";
 
 const authLogger = logger.child({ component: "auth" });
+
+const SALT_ROUNDS = 10; // Standard salt rounds for bcrypt
 
 /**
  * Types of authentication methods supported
@@ -26,127 +28,178 @@ export interface AuthenticatedClient {
 }
 
 /**
- * API Key entry
+ * Represents an API key record in the database
  */
-interface ApiKey {
-  key: string;
-  client: AuthenticatedClient;
+interface ApiKeyRecord {
+  id: string; // PK, uuid
+  key_hash: string; // Hashed key
+  client_id: string;
+  client_name: string;
+  permissions: PermissionLevel;
   enabled: boolean;
+  created_at: string;
+  metadata?: Record<string, any>;
 }
 
 /**
- * Simple in-memory API key store
- * In a real application, this would be stored in a database
+ * Database-backed API key store
  */
 class ApiKeyStore {
-  private keys: Map<string, ApiKey> = new Map();
-
   constructor() {
-    this.loadKeysFromConfig();
+    authLogger.info("ApiKeyStore initialized (using Database)");
   }
 
   /**
-   * Load API keys from environment or configuration
-   */
-  private loadKeysFromConfig() {
-    try {
-      // Load API keys from config
-      const configuredKeys = config.auth.apiKeys;
-
-      if (configuredKeys.length > 0) {
-        // Register the first key as the default admin key
-        this.registerKey(configuredKeys[0], {
-          id: "default",
-          name: "Default API Key",
-          permissions: "admin",
-        });
-        authLogger.info("Loaded default API key from configuration");
-
-        // Register any additional keys
-        for (let i = 1; i < configuredKeys.length; i++) {
-          this.registerKey(configuredKeys[i], {
-            id: `api-key-${i}`,
-            name: `API Key ${i}`,
-            permissions: "admin",
-          });
-        }
-      }
-
-      // For Production, we would load additional keys from the database
-      if (config.server.environment === "development") {
-        this.registerKey("test-public-key", {
-          id: "test-public",
-          name: "Test Public Client",
-          permissions: "public",
-        });
-
-        this.registerKey("test-protected-key", {
-          id: "test-protected",
-          name: "Test Protected Client",
-          permissions: "protected",
-        });
-
-        this.registerKey("test-admin-key", {
-          id: "test-admin",
-          name: "Test Admin Client",
-          permissions: "admin",
-        });
-
-        authLogger.info("Added test API keys for development environment");
-      }
-    } catch (error) {
-      authLogger.error(
-        "Failed to load API keys from configuration",
-        error as Error
-      );
-    }
-  }
-
-  /**
-   * Register a new API key
-   * @param key The API key string
+   * Register a new API key in the database
+   * @param key The raw API key string
    * @param client The client information
    */
-  registerKey(key: string, client: AuthenticatedClient): void {
+  async registerKey(key: string, client: AuthenticatedClient): Promise<void> {
     if (!key || key.length < 8) {
       throw new Error("API key must be at least 8 characters long");
     }
 
-    this.keys.set(key, { key, client, enabled: true });
-    authLogger.debug("Registered new API key", {
+    const keyHash = await bcrypt.hash(key, SALT_ROUNDS);
+    authLogger.debug("Generated hash for new API key");
+
+    const { data, error } = await supabase
+      .from("api_keys")
+      .insert({
+        key_hash: keyHash, // Store the hash
+        client_id: client.id,
+        client_name: client.name,
+        permissions: client.permissions,
+        metadata: client.metadata,
+        enabled: true,
+      })
+      .select();
+
+    if (error) {
+      if (error.code === "23505") {
+        // PostgreSQL unique violation code
+        authLogger.warn(
+          `Attempted to register duplicate API key (based on hash) for client: ${client.id}`
+        );
+        throw new Error(`API key already exists (or hash collision).`);
+      } else {
+        authLogger.error("Failed to register API key in database", error);
+        throw new Error(`Database error registering API key: ${error.message}`);
+      }
+    }
+
+    if (!data || data.length === 0) {
+      authLogger.error("API key insertion returned no data");
+      throw new Error(
+        "Failed to register API key, insertion returned no data."
+      );
+    }
+
+    authLogger.debug("Registered new API key in database", {
+      dbId: (data[0] as ApiKeyRecord).id,
       clientId: client.id,
       permissions: client.permissions,
     });
   }
 
   /**
-   * Validate an API key and return the associated client
-   * @param key The API key to validate
-   * @returns The authenticated client or null if invalid
+   * Validate a raw API key for a specific client ID against the stored hash.
+   * @param clientId The client ID provided by the client
+   * @param key The raw API key to validate
+   * @returns The authenticated client or null if invalid/not found/mismatch
    */
-  validateKey(key: string): AuthenticatedClient | null {
-    if (!key) return null;
-
-    const apiKey = this.keys.get(key);
-    if (!apiKey || !apiKey.enabled) {
+  async validateKey(
+    clientId: string | null,
+    key: string | null
+  ): Promise<AuthenticatedClient | null> {
+    if (!clientId || !key) {
       return null;
     }
 
-    return apiKey.client;
+    const { data: apiKeyRecord, error: fetchError } = await supabase
+      .from("api_keys")
+      .select(
+        "client_id, client_name, permissions, metadata, enabled, key_hash"
+      )
+      .eq("client_id", clientId)
+      .eq("enabled", true)
+      .limit(1)
+      .maybeSingle();
+
+    if (fetchError) {
+      authLogger.error(
+        "Database error fetching API key by client ID",
+        fetchError
+      );
+      return null; // Internal error during lookup
+    }
+
+    if (!apiKeyRecord) {
+      authLogger.debug("No enabled API key found for client ID", { clientId });
+      return null; // No matching enabled key for this client ID
+    }
+
+    if (!apiKeyRecord.key_hash) {
+      authLogger.error(
+        `Stored API key record is missing hash for client ID: ${clientId}`
+      );
+      return null;
+    }
+
+    const match = await bcrypt.compare(key, apiKeyRecord.key_hash);
+
+    if (match) {
+      authLogger.debug("API key validated successfully", { clientId });
+      // Key matches, return client info
+      return {
+        id: apiKeyRecord.client_id,
+        name: apiKeyRecord.client_name,
+        permissions: apiKeyRecord.permissions as PermissionLevel,
+        metadata: apiKeyRecord.metadata,
+      };
+    } else {
+      authLogger.warn("API key validation failed (hash mismatch)", {
+        clientId,
+      });
+      return null; // Key did not match hash
+    }
   }
 
   /**
-   * Disable an API key
-   * @param key The API key to disable
+   * Disable an API key in the database using its primary key ID.
+   * @param apiKeyDbId The UUID primary key of the api_keys record to disable.
+   * @returns True if a record was updated, false otherwise.
    */
-  disableKey(key: string): boolean {
-    const apiKey = this.keys.get(key);
-    if (!apiKey) return false;
+  async disableKey(apiKeyDbId: string): Promise<boolean> {
+    if (!apiKeyDbId) {
+      authLogger.warn("disableKey called without a database ID.");
+      return false;
+    }
 
-    apiKey.enabled = false;
-    this.keys.set(key, apiKey);
-    authLogger.info("Disabled API key", { clientId: apiKey.client.id });
-    return true;
+    authLogger.info("Attempting to disable API key by database ID", {
+      apiKeyDbId,
+    });
+
+    const { count, error } = await supabase
+      .from("api_keys")
+      .update({ enabled: false })
+      .eq("id", apiKeyDbId)
+      .eq("enabled", true);
+
+    if (error) {
+      authLogger.error("Database error disabling API key by ID", error);
+      return false;
+    }
+
+    const updated = count !== null && count > 0;
+    if (updated) {
+      authLogger.info("Disabled API key in database", { apiKeyDbId });
+    } else {
+      authLogger.warn(
+        "API key disable did not update any rows (not found or already disabled)",
+        { apiKeyDbId }
+      );
+    }
+    return updated;
   }
 }
 
@@ -171,46 +224,15 @@ export class AuthService {
   }
 
   /**
-   * Extract authentication credentials from a request
-   * @param headers The request headers
-   * @returns The authentication method and credentials
-   */
-  extractCredentials(headers: Headers): {
-    method: AuthMethod;
-    credentials: string | null;
-  } {
-    const authHeader = headers.get("Authorization");
-
-    if (authHeader) {
-      // Check specifically for Bearer scheme (case-insensitive)
-      if (authHeader.toLowerCase().startsWith("bearer ")) {
-        const token = authHeader.slice(7).trim();
-        if (token) {
-          return { method: "bearer_token", credentials: token };
-        } else {
-          authLogger.warn(
-            "Authorization header with Bearer scheme found but token is empty."
-          );
-        }
-      } else {
-        // Log if Authorization header is present but not using Bearer scheme
-        authLogger.warn(
-          "Authorization header found but does not use the recommended 'Bearer' scheme."
-        );
-      }
-    }
-
-    // No valid authentication provided
-    return { method: "none", credentials: null };
-  }
-
-  /**
-   * Authenticate a request
-   * @param headers The request headers
+   * Authenticate a request using Client ID and Key
+   * @param clientId Client ID from X-Client-ID header
+   * @param key API Key / Bearer Token from Authorization header
    * @returns The authenticated client or null if authentication failed
    */
-  authenticate(headers: Headers): AuthenticatedClient | null {
-    // If authentication is disabled, return a default public client
+  async authenticate(
+    clientId: string | null,
+    key: string | null
+  ): Promise<AuthenticatedClient | null> {
     if (!this.authEnabled) {
       return {
         id: "anonymous",
@@ -219,39 +241,18 @@ export class AuthService {
       };
     }
 
-    const { method, credentials } = this.extractCredentials(headers);
+    const client = await this.apiKeys.validateKey(clientId, key);
 
-    if (method === "none" || !credentials) {
-      authLogger.debug("No authentication credentials provided");
-      return null;
+    if (client) {
+      authLogger.debug(`Authenticated successfully`, { clientId: client.id });
+      return client;
     }
 
-    if (method === "api_key") {
-      const client = this.apiKeys.validateKey(credentials);
-      if (client) {
-        authLogger.debug("Authenticated via API key", {
-          clientId: client.id,
-          permissions: client.permissions,
-        });
-        return client;
-      }
-      authLogger.warn("Invalid API key provided");
-      return null;
-    }
-
-    if (method === "bearer_token") {
-      // For now, treats bearer tokens the same as API keys
-      // In Production, we will validate JWT tokens or OAuth tokens
-      const client = this.apiKeys.validateKey(credentials);
-      if (client) {
-        authLogger.debug("Authenticated via Bearer token", {
-          clientId: client.id,
-          permissions: client.permissions,
-        });
-        return client;
-      }
-      authLogger.warn("Invalid Bearer token provided");
-      return null;
+    if (clientId || key) {
+      authLogger.warn(`Authentication failed`, {
+        clientIdProvided: clientId,
+        hasKey: !!key,
+      });
     }
 
     return null;
@@ -284,21 +285,24 @@ export class AuthService {
 
   /**
    * Register a new API key
-   * @param key The API key
-   * @param client The client information
    */
-  registerApiKey(key: string, client: AuthenticatedClient): void {
-    this.apiKeys.registerKey(key, client);
+  async registerApiKey(
+    key: string,
+    client: AuthenticatedClient
+  ): Promise<void> {
+    await this.apiKeys.registerKey(key, client);
   }
 
   /**
-   * Disable an API key
-   * @param key The API key to disable
+   * Disable an API key using its database primary key ID
+   * @param apiKeyDbId The UUID primary key of the api_keys record
    */
-  disableApiKey(key: string): boolean {
-    return this.apiKeys.disableKey(key);
+  async disableApiKey(apiKeyDbId: string): Promise<boolean> {
+    authLogger.info("AuthService attempting disableApiKey by ID", {
+      apiKeyDbId,
+    });
+    return await this.apiKeys.disableKey(apiKeyDbId);
   }
 }
 
-// Creates a singleton instance of the auth service
 export const authService = new AuthService();

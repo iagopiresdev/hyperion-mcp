@@ -1,5 +1,5 @@
 import type { Context, MiddlewareHandler, Next } from "hono";
-import { toolRegistry } from "../registry";
+import type { PermissionLevel } from "../utils/auth";
 import { authService } from "../utils/auth";
 import { logger } from "../utils/logger";
 
@@ -18,26 +18,65 @@ export interface AuthContext {
 }
 
 /**
- * Authentication middleware that validates API keys and sets auth context
+ * Extracts credentials (API Key/Bearer Token and Client ID) from headers.
+ */
+function extractClientCredentials(headers: Headers): {
+  key: string | null;
+  clientId: string | null;
+} {
+  let key: string | null = null;
+  const authHeader = headers.get("Authorization");
+  if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
+    key = authHeader.slice(7).trim() || null;
+  }
+
+  // Extract Client ID from custom header (case-insensitive)
+  const clientId =
+    headers.get("X-Client-ID") || headers.get("x-client-id") || null;
+
+  if (key && !clientId) {
+    authLogger.warn(
+      "Bearer token provided without X-Client-ID header. Authentication will likely fail."
+    );
+  }
+  if (!key && clientId) {
+    authLogger.warn(
+      "X-Client-ID header provided without Bearer token. Authentication will likely fail."
+    );
+  }
+
+  return { key, clientId };
+}
+
+/**
+ * Authentication middleware that validates API keys/Client ID and sets auth context
  */
 export const authentication: MiddlewareHandler = async (
   c: Context,
   next: Next
 ) => {
   try {
-    const client = authService.authenticate(c.req.raw.headers);
+    const { key, clientId } = extractClientCredentials(c.req.raw.headers);
+
+    const client = await authService.authenticate(clientId, key);
 
     c.set("auth", {
       isAuthenticated: !!client,
       clientId: client?.id,
       clientName: client?.name,
-      permissions: client?.permissions,
+      permissions: client?.permissions as PermissionLevel,
     });
 
     if (client) {
       authLogger.debug("Request authenticated", {
         clientId: client.id,
         permissions: client.permissions,
+        path: c.req.path,
+      });
+    } else if (key || clientId) {
+      authLogger.debug("Authentication failed for provided credentials", {
+        hasKey: !!key,
+        clientIdProvided: clientId,
         path: c.req.path,
       });
     } else {
@@ -48,78 +87,7 @@ export const authentication: MiddlewareHandler = async (
 
     await next();
   } catch (error) {
-    authLogger.error("Authentication error", error as Error);
-    return c.json({ error: "Authentication failed" }, 401);
-  }
-};
-
-/**
- * Authorization middleware that checks permissions for tool access
- */
-export const toolAuthorization: MiddlewareHandler = async (
-  c: Context,
-  next: Next
-) => {
-  // TODO: This is a temporary solution, we need to add a proper permission system
-  if (c.req.path !== "/tools" || c.req.method !== "POST") {
-    await next();
-    return;
-  }
-
-  try {
-    const auth = c.get("auth") as AuthContext["auth"];
-
-    const body = await c.req.json();
-    const toolName = body.name;
-
-    if (!toolName) {
-      return c.json({ error: "Tool name is required" }, 400);
-    }
-
-    const tool = toolRegistry.getToolDefinition(toolName);
-
-    if (!tool) {
-      return c.json(
-        {
-          error: `Unknown tool: ${toolName}`,
-          availableTools: toolRegistry.getAllTools().map((t) => t.name),
-        },
-        404
-      );
-    }
-
-    const requiredPermission = tool.permissionLevel || "public";
-
-    const hasPermission = authService.hasPermission(
-      auth.isAuthenticated
-        ? {
-            id: auth.clientId!,
-            name: auth.clientName!,
-            permissions: auth.permissions as any,
-          }
-        : null,
-      requiredPermission
-    );
-
-    if (!hasPermission) {
-      authLogger.warn("Unauthorized tool access attempt", {
-        toolName,
-        clientId: auth.clientId,
-        requiredPermission,
-      });
-
-      return c.json(
-        {
-          error: `Access denied: insufficient permissions to use the '${toolName}' tool`,
-          requiredPermission,
-        },
-        403
-      );
-    }
-
-    await next();
-  } catch (error) {
-    authLogger.error("Authorization error", error as Error);
-    return c.json({ error: "Authorization failed" }, 403);
+    authLogger.error("Authentication middleware error", error as Error);
+    return c.json({ error: "Authentication failed due to server error" }, 500);
   }
 };
