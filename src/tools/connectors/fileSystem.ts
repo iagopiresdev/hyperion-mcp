@@ -10,8 +10,6 @@ export { fs as fsPromises };
 const fsLogger = logger.child({ component: "file-system-tool" });
 
 const MAX_READ_LENGTH = 10000;
-const SANDBOX_BASE_PATH = path.resolve(config.fsTool.basePath);
-fsLogger.info(`File system tool sandboxed to: ${SANDBOX_BASE_PATH}`);
 
 /**
  * Resolves a user-provided relative path against the sandbox base path
@@ -21,7 +19,11 @@ fsLogger.info(`File system tool sandboxed to: ${SANDBOX_BASE_PATH}`);
  * @throws If the path attempts to escape the sandbox or is invalid.
  */
 export function resolveSandboxPath(relativePath: string): string {
-  const absoluteBasePath = SANDBOX_BASE_PATH;
+  const absoluteBasePath = path.resolve(config.fsTool.basePath);
+  fsLogger.debug(
+    `Resolving path '${relativePath}' against base '${absoluteBasePath}'`
+  );
+
   const requestedPath = path.resolve(absoluteBasePath, relativePath);
 
   if (!requestedPath.startsWith(absoluteBasePath)) {

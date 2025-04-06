@@ -1,97 +1,185 @@
-import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test";
-import { toolRegistry } from "../../../src/registry";
-import "../../../src/tools/connectors/webBrowser";
-import type { ToolHandler } from "../../../src/types/mcp";
-import { logger as appLogger } from "../../../src/utils/logger";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  mock,
+  type Mock,
+} from "bun:test";
+import { fetchWebpageHandler } from "../../../src/tools/connectors/webBrowser";
 
-const mockLoggerChild = {
-  info: mock(() => {}),
-  warn: mock(() => {}),
-  error: mock(() => {}),
-};
-const mockLogger = {
-  child: mock(() => mockLoggerChild),
-  info: mock(() => {}),
-  warn: mock(() => {}),
-  error: mock(() => {}),
-};
+type MockFetchFn = (
+  url: string | URL | Request,
+  options?: RequestInit
+) => Promise<Response>;
+type MockFetch = Mock<MockFetchFn>;
+
+const MAX_CONTENT_LENGTH = 5000; // Match constant in tool
 
 describe("Web Browser Tool (Unit Tests)", () => {
-  let handler: ToolHandler | undefined;
-
-  beforeAll(() => {
-    handler = toolRegistry.getToolHandler("fetch_webpage");
-    Object.assign(appLogger, mockLogger);
-    if (!handler) {
-      throw new Error("fetch_webpage handler not found");
-    }
-  });
+  let mockFetch: MockFetch;
+  let originalFetch: typeof fetch;
 
   beforeEach(() => {
-    mockLogger.child.mockClear();
-    mockLogger.info.mockClear();
-    mockLogger.warn.mockClear();
-    mockLogger.error.mockClear();
-    mockLoggerChild.info.mockClear();
-    mockLoggerChild.warn.mockClear();
-    mockLoggerChild.error.mockClear();
+    originalFetch = globalThis.fetch;
+    mockFetch = mock<MockFetchFn>(async (url, options) => {
+      return new Response("<html><body>Mock Content</body></html>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      });
+    });
+    globalThis.fetch = mockFetch as any;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    mockFetch.mockRestore();
   });
 
   describe("fetch_webpage", () => {
-    const MOCK_URL = "https://example.com/page";
+    it("should process text content successfully", async () => {
+      const url = "https://example.com";
+      const result = await fetchWebpageHandler({ url });
+      expect(mockFetch).toHaveBeenCalledWith(url, expect.anything());
+      expect(result.content).toBe("Mock Content");
+      expect(result.metadata?.error).toBeUndefined();
+      expect(result.metadata?.truncated).toBe(false);
+    });
 
-    // Helper to create mock Response objects (compatible with fetch)
-    const mockResponse = (
-      status: number,
-      body: string | null,
-      contentType: string | null,
-      statusText: string = "OK"
-    ): Response => {
-      // Return Response directly
-      const headers = new Headers();
-      if (contentType) {
-        headers.set("content-type", contentType);
-      }
-      const response = new Response(body, { status, statusText, headers });
-      // Manually set ok status as Response constructor doesn't always do it based on status
-      Object.defineProperty(response, "ok", {
-        value: status >= 200 && status < 300,
+    it("should process html content successfully when requested", async () => {
+      const url = "https://example.com/page.html";
+      const htmlContent =
+        "<html><head></head><body><h1>Title</h1><p>Paragraph.</p></body></html>";
+      mockFetch.mockResolvedValueOnce(
+        new Response(htmlContent, {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        })
+      );
+
+      const result = await fetchWebpageHandler({ url, output_format: "html" });
+      expect(mockFetch).toHaveBeenCalledWith(url, expect.anything());
+      expect(result.content).toBe(htmlContent);
+      expect(result.metadata?.error).toBeUndefined();
+      expect(result.metadata?.truncated).toBe(false);
+    });
+
+    it("should handle fetch returning HTTP error status", async () => {
+      const url = "https://example.com/notfound";
+      mockFetch.mockResolvedValueOnce(
+        new Response("Not Found", {
+          status: 404,
+          statusText: "Not Found",
+          headers: { "Content-Type": "text/plain" },
+        })
+      );
+
+      const result = await fetchWebpageHandler({ url });
+      expect(mockFetch).toHaveBeenCalledWith(url, expect.anything());
+      expect(result.content).toBeNull();
+      expect(result.metadata?.status).toBe(404);
+      expect(result.metadata?.error).toBe("HTTP Error: Not Found");
+    });
+
+    it("should handle fetch throwing a network error", async () => {
+      const url = "https://example.com/networkerror";
+      const networkError = new Error("Network request failed");
+      mockFetch.mockRejectedValueOnce(networkError);
+
+      const result = await fetchWebpageHandler({ url });
+      expect(mockFetch).toHaveBeenCalledWith(url, expect.anything());
+      expect(result.content).toBeNull();
+      expect(result.metadata?.status).toBe(500);
+      expect(result.metadata?.error).toBe(
+        `Network or processing error: ${networkError.message}`
+      );
+    });
+
+    it("should handle unsupported content types", async () => {
+      const url = "https://example.com/data.json";
+      mockFetch.mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: 123 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      );
+
+      const result = await fetchWebpageHandler({ url });
+      expect(mockFetch).toHaveBeenCalledWith(url, expect.anything());
+      expect(result.content).toBeNull();
+      expect(result.metadata?.status).toBe(200);
+      expect(result.metadata?.error).toBe(
+        "Unsupported content type: application/json"
+      );
+    });
+
+    it("should truncate long text content", async () => {
+      const url = "https://example.com/longtext";
+      const longContent = "a".repeat(MAX_CONTENT_LENGTH + 100);
+      const truncatedContent =
+        "a".repeat(MAX_CONTENT_LENGTH) + "... [truncated]";
+      mockFetch.mockResolvedValueOnce(
+        new Response(longContent, {
+          status: 200,
+          headers: { "Content-Type": "text/plain" },
+        })
+      );
+
+      const result = await fetchWebpageHandler({ url, output_format: "text" });
+      expect(mockFetch).toHaveBeenCalledWith(url, expect.anything());
+      expect(result.content).toBe(truncatedContent);
+      expect(result.metadata?.truncated).toBe(true);
+      expect(result.metadata?.error).toBeUndefined();
+    });
+
+    it("should truncate long html content", async () => {
+      const url = "https://example.com/longhtml";
+      const longHtml = `<html><body>${"<p>text</p>".repeat(
+        MAX_CONTENT_LENGTH / 10
+      )}</body></html>`; // Ensure it exceeds limit
+      const truncatedHtml =
+        longHtml.substring(0, MAX_CONTENT_LENGTH) + "... [truncated]";
+      mockFetch.mockResolvedValueOnce(
+        new Response(longHtml, {
+          status: 200,
+          headers: { "Content-Type": "text/html" },
+        })
+      );
+
+      const result = await fetchWebpageHandler({ url, output_format: "html" });
+      expect(mockFetch).toHaveBeenCalledWith(url, expect.anything());
+      expect(result.content).toBe(truncatedHtml);
+      expect(result.metadata?.truncated).toBe(true);
+      expect(result.metadata?.error).toBeUndefined();
+    });
+
+    it("should handle invalid URL format (zod schema)", async () => {
+      const result = await fetchWebpageHandler({ url: "invalid-url" });
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(result.content).toBeNull();
+      expect(result.metadata?.error).toContain(
+        "Invalid URL format. Must include http:// or https://"
+      );
+    });
+
+    it("should handle missing URL parameter", async () => {
+      const result = await fetchWebpageHandler({});
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(result.content).toBeNull();
+      expect(result.metadata?.error).toMatch(/^Invalid input: Required$/);
+    });
+
+    it("should handle invalid parameters (e.g., bad output_format)", async () => {
+      const result = await fetchWebpageHandler({
+        url: "https://example.com",
+        output_format: "xml",
       });
-      return response; // Return the Response object
-    };
-
-    test("should process text content successfully (assuming fetch works)", async () => {
-      const htmlContent = "<html><p>Hello</p></html>";
-      const textContent = "Hello";
-      // We can't easily mock fetch here anymore without DI or global mock.
-      // This test now implicitly relies on either network access or that the handler
-      // uses a mocked fetch injected elsewhere (which it doesn't currently).
-      // For true unit testing, the handler needs refactoring for fetch injection.
-      // For now, these tests will likely fail if run without network or if example.com changes.
-      // Let's skip these or focus only on parameter validation tests.
-
-      // For demonstration, let's focus on tests that *don't* rely on fetch result processing:
-      // await expect(handler!({ url: MOCK_URL, output_format: "text" })).resolves.toBeDefined(); // Too simple
-    });
-
-    test("should handle invalid URL format (zod schema)", async () => {
-      const result = await handler!({ url: "not-a-valid-url" });
+      expect(mockFetch).not.toHaveBeenCalled();
       expect(result.content).toBeNull();
-      expect(result.metadata?.error).toContain("Invalid URL format");
+      expect(result.metadata?.error).toContain(
+        "Invalid enum value. Expected 'text' | 'html', received 'xml'"
+      );
     });
-
-    test("should handle missing URL parameter", async () => {
-      const result = await handler!({}); // Missing URL
-      expect(result.content).toBeNull();
-      expect(result.metadata?.error).toContain("Required");
-    });
-
-    test("should handle invalid parameters (e.g., bad output_format)", async () => {
-      const result = await handler!({ url: MOCK_URL, output_format: "xml" });
-      expect(result.content).toBeNull();
-      expect(result.metadata?.error).toMatch(/Invalid enum value/);
-    });
-
-    // TODO: Tests involving successful fetch, truncation, HTTP errors, content types etc.
   });
 });

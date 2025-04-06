@@ -25,7 +25,7 @@ const FetchWebpageParamsSchema = z.object({
   output_format: z.enum(["text", "html"]).optional().default("text"),
 });
 
-async function fetchWebpageHandler(
+export async function fetchWebpageHandler(
   //FIXME: Create a proper signature required by registerTool
   params: Record<string, any>
 ): Promise<MCPToolResponse> {
