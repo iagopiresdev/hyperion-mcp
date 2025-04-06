@@ -1,90 +1,141 @@
-/**
- * Simple in-memory database for tasks (pre-MVP only)
- */
+import { PostgrestError } from "@supabase/supabase-js";
+import { supabase } from "../utils/supabaseClient";
 
 export interface Task {
   id: string;
   title: string;
-  description?: string;
-  dueDate?: string;
+  description?: string | null;
+  dueDate?: string | null; // Allow null from DB, map to due_date
   completed: boolean;
   createdAt: string;
 }
 
-let tasks: Task[] = [
-  {
-    id: "1",
-    title: "Implement MCP server",
-    description: "Create a Model Context Protocol server for demonstration",
-    completed: false,
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: "2",
-    title: "Add tool implementations",
-    description: "Create proper handlers for MCP tools",
-    completed: true,
-    createdAt: new Date().toISOString(),
-  },
-];
+const handleSupabaseError = (error: PostgrestError | null, context: string) => {
+  if (error) {
+    console.error(`Supabase error in ${context}:`, error.message);
+    return true;
+  }
+  return false;
+};
+
+// Supabase JS v2 handles this automatically for basic cases, but explicit is safer
+const mapRowToTask = (row: any): Task => ({
+  id: row.id,
+  title: row.title,
+  description: row.description,
+  dueDate: row.due_date ? new Date(row.due_date).toISOString() : null,
+  completed: row.completed,
+  createdAt: new Date(row.created_at).toISOString(),
+});
 
 export const db = {
-  listTasks: (status?: "all" | "completed" | "active") => {
-    if (!status || status === "all") {
-      return [...tasks];
+  listTasks: async (
+    status?: "all" | "completed" | "active"
+  ): Promise<Task[]> => {
+    let query = supabase.from("tasks").select("*");
+
+    if (status === "completed") {
+      query = query.eq("completed", true);
+    } else if (status === "active") {
+      query = query.eq("completed", false);
     }
-    return tasks.filter((task) =>
-      status === "completed" ? task.completed : !task.completed
-    );
+    // Default 'all' requires no filter on completed status
+
+    query = query.order("created_at", { ascending: false }); // Example ordering
+
+    const { data, error } = await query;
+
+    if (handleSupabaseError(error, "listTasks")) {
+      return [];
+    }
+
+    return data ? data.map(mapRowToTask) : [];
   },
 
-  getTask: (id: string) => {
-    return tasks.find((task) => task.id === id);
+  getTask: async (id: string): Promise<Task | null> => {
+    const { data, error } = await supabase
+      .from("tasks")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (handleSupabaseError(error, `getTask (id: ${id})`)) {
+      return null;
+    }
+
+    return data ? mapRowToTask(data) : null;
   },
 
-  createTask: (task: Omit<Task, "id" | "completed" | "createdAt">) => {
-    const newTask: Task = {
-      id: Math.random().toString(36).substring(2, 9),
-      ...task,
-      completed: false,
-      createdAt: new Date().toISOString(),
-    };
-    tasks.push(newTask);
-    return newTask;
+  //FIXME: Omit might not be fully type-safe with DB defaults (like createdAt, completed)
+  createTask: async (
+    taskInput: Omit<Task, "id" | "completed" | "createdAt">
+  ): Promise<Task | null> => {
+    const { data, error } = await supabase
+      .from("tasks")
+      .insert({
+        title: taskInput.title,
+        description: taskInput.description,
+        due_date: taskInput.dueDate
+          ? new Date(taskInput.dueDate).toISOString()
+          : null,
+      })
+      .select()
+      .single();
+
+    if (handleSupabaseError(error, "createTask")) {
+      return null;
+    }
+
+    return data ? mapRowToTask(data) : null;
   },
 
-  updateTask: (
+  updateTask: async (
     id: string,
     updates: Partial<Omit<Task, "id" | "createdAt">>
-  ) => {
-    const index = tasks.findIndex((task) => task.id === id);
-    if (index === -1) return null;
+  ): Promise<Task | null> => {
+    // Map Task fields (camelCase) to DB columns (snake_case)
+    const dbUpdates: { [key: string]: any } = {};
+    if (updates.title !== undefined) dbUpdates.title = updates.title;
+    if (updates.description !== undefined)
+      dbUpdates.description = updates.description;
+    if (updates.dueDate !== undefined) {
+      dbUpdates.due_date = updates.dueDate
+        ? new Date(updates.dueDate).toISOString()
+        : null;
+    }
+    if (updates.completed !== undefined)
+      dbUpdates.completed = updates.completed;
 
-    tasks[index] = {
-      ...tasks[index],
-      ...updates,
-    };
-    return tasks[index];
+    if (Object.keys(dbUpdates).length === 0) {
+      return db.getTask(id);
+    }
+
+    const { data, error } = await supabase
+      .from("tasks")
+      .update(dbUpdates)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (handleSupabaseError(error, `updateTask (id: ${id})`)) {
+      //TODO: Specific check for not found might be needed depending on Supabase error codes (e.g., P0002)
+      return null;
+    }
+
+    return data ? mapRowToTask(data) : null;
   },
 
-  completeTask: (id: string) => {
-    const index = tasks.findIndex((task) => task.id === id);
-    if (index === -1) return null;
-
-    tasks[index].completed = true;
-    return tasks[index];
+  completeTask: async (id: string): Promise<Task | null> => {
+    return db.updateTask(id, { completed: true });
   },
 
-  deleteTask: (id: string) => {
-    const index = tasks.findIndex((task) => task.id === id);
-    if (index === -1) return false;
+  deleteTask: async (id: string): Promise<boolean> => {
+    const { error } = await supabase.from("tasks").delete().eq("id", id);
 
-    tasks.splice(index, 1);
+    if (handleSupabaseError(error, `deleteTask (id: ${id})`)) {
+      //FIXME: The operation might "succeed" even if 0 rows were deleted.
+      return false;
+    }
     return true;
-  },
-
-  // Intended for testing purposes
-  _resetTasks: () => {
-    tasks = []; // Reset to an empty array
   },
 };

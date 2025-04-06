@@ -25,10 +25,21 @@ interface ApiKeys {
   github?: string;
 }
 
+interface PineconeConfig {
+  indexName?: string;
+}
+
+interface FsToolConfig {
+  allowedReadPaths?: string[];
+  allowedWritePaths?: string[];
+}
+
 interface Config {
   server: ServerConfig;
   auth: AuthConfig;
   apiKeys: ApiKeys;
+  pinecone: PineconeConfig;
+  fsTool: FsToolConfig;
 }
 
 function parseNumber(value: string | undefined, defaultValue: number): number {
@@ -88,6 +99,22 @@ function createConfig(): Config {
   const openaiApiKey = process.env.OPENAI_API_KEY;
   const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
   const githubToken = process.env.GITHUB_TOKEN;
+  const pineconeIndexName = process.env.PINECONE_INDEX_NAME;
+
+  const allowedReadPathsRaw = process.env.FS_ALLOWED_READ_PATHS;
+  const allowedWritePathsRaw = process.env.FS_ALLOWED_WRITE_PATHS;
+  const allowedReadPaths = allowedReadPathsRaw
+    ? allowedReadPathsRaw
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p)
+    : undefined;
+  const allowedWritePaths = allowedWritePathsRaw
+    ? allowedWritePathsRaw
+        .split(",")
+        .map((p) => p.trim())
+        .filter((p) => p)
+    : undefined;
 
   if (environment !== "test" && !openaiApiKey) {
     configLogger.warn(
@@ -98,6 +125,21 @@ function createConfig(): Config {
   if (environment !== "test" && !anthropicApiKey) {
     configLogger.warn(
       "ANTHROPIC_API_KEY not set, Anthropic tools will not work correctly"
+    );
+  }
+
+  if (environment !== "test" && !pineconeIndexName) {
+    configLogger.warn(
+      "PINECONE_INDEX_NAME not set, Pinecone search tool might not work correctly"
+    );
+  }
+
+  if (
+    environment !== "production" &&
+    (!allowedReadPaths || allowedReadPaths.length === 0)
+  ) {
+    configLogger.warn(
+      "FS_ALLOWED_READ_PATHS not set or empty, file system read tool might be restricted or disabled."
     );
   }
 
@@ -116,6 +158,13 @@ function createConfig(): Config {
       openai: openaiApiKey,
       anthropic: anthropicApiKey,
       github: githubToken,
+    },
+    pinecone: {
+      indexName: pineconeIndexName,
+    },
+    fsTool: {
+      allowedReadPaths: allowedReadPaths,
+      allowedWritePaths: allowedWritePaths,
     },
   };
 
