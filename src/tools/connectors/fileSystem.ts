@@ -6,6 +6,7 @@ import type { MCPToolResponse } from "../../types/mcp";
 import { config } from "../../utils/config";
 import { logger } from "../../utils/logger";
 
+export { fs as fsPromises };
 const fsLogger = logger.child({ component: "file-system-tool" });
 
 const MAX_READ_LENGTH = 10000;
@@ -19,7 +20,7 @@ fsLogger.info(`File system tool sandboxed to: ${SANDBOX_BASE_PATH}`);
  * @returns The absolute, sanitized path within the sandbox.
  * @throws If the path attempts to escape the sandbox or is invalid.
  */
-function resolveSandboxPath(relativePath: string): string {
+export function resolveSandboxPath(relativePath: string): string {
   const absoluteBasePath = SANDBOX_BASE_PATH;
   const requestedPath = path.resolve(absoluteBasePath, relativePath);
 
@@ -44,7 +45,7 @@ const ListDirectoryParamsSchema = z.object({
   path: z.string().optional().default("."),
 });
 
-async function listDirectoryHandler(
+export async function listDirectoryHandler(
   params: Record<string, any>
 ): Promise<MCPToolResponse> {
   const validationResult = ListDirectoryParamsSchema.safeParse(params);
@@ -86,34 +87,11 @@ async function listDirectoryHandler(
   }
 }
 
-registerTool(
-  "list_directory",
-  "Lists files and directories within a specified path relative to the sandbox.",
-  {
-    type: "object",
-    properties: {
-      path: {
-        type: "string",
-        description:
-          "The relative path within the sandbox directory (e.g., 'subfolder', '.'). Defaults to the sandbox root.",
-        default: ".",
-      },
-    },
-    required: [],
-  },
-  listDirectoryHandler,
-  "admin", // High permission level due to file system access
-  {
-    category: "connectors",
-    tags: ["filesystem", "files", "list"],
-  }
-);
-
 const ReadFileParamsSchema = z.object({
   path: z.string().min(1, "Path is required"),
 });
 
-async function readFileHandler(
+export async function readFileHandler(
   params: Record<string, any>
 ): Promise<MCPToolResponse> {
   const validationResult = ReadFileParamsSchema.safeParse(params);
@@ -175,6 +153,29 @@ async function readFileHandler(
     };
   }
 }
+
+registerTool(
+  "list_directory",
+  "Lists files and directories within a specified path relative to the sandbox.",
+  {
+    type: "object",
+    properties: {
+      path: {
+        type: "string",
+        description:
+          "The relative path within the sandbox directory (e.g., 'subfolder', '.'). Defaults to the sandbox root.",
+        default: ".",
+      },
+    },
+    required: [],
+  },
+  listDirectoryHandler,
+  "admin", // High permission level due to file system access
+  {
+    category: "connectors",
+    tags: ["filesystem", "files", "list"],
+  }
+);
 
 registerTool(
   "read_file",

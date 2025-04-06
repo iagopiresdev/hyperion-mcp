@@ -10,9 +10,6 @@
     "test:integration": "bun test tests/integration/",
     "test:coverage": "bun test --coverage"
   },
-  "devDependencies": {
-    "@types/bun": "latest"
-  },
   "peerDependencies": {
     "typescript": "^5.0.0"
   },

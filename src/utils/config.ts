@@ -30,6 +30,7 @@ interface PineconeConfig {
 }
 
 interface FsToolConfig {
+  basePath: string;
   allowedReadPaths?: string[];
   allowedWritePaths?: string[];
 }
@@ -101,6 +102,7 @@ function createConfig(): Config {
   const githubToken = process.env.GITHUB_TOKEN;
   const pineconeIndexName = process.env.PINECONE_INDEX_NAME;
 
+  const basePath = process.env.FS_BASE_PATH || ".";
   const allowedReadPathsRaw = process.env.FS_ALLOWED_READ_PATHS;
   const allowedWritePathsRaw = process.env.FS_ALLOWED_WRITE_PATHS;
   const allowedReadPaths = allowedReadPathsRaw
@@ -163,6 +165,7 @@ function createConfig(): Config {
       indexName: pineconeIndexName,
     },
     fsTool: {
+      basePath: basePath,
       allowedReadPaths: allowedReadPaths,
       allowedWritePaths: allowedWritePaths,
     },
