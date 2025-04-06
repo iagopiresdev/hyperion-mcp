@@ -96,6 +96,11 @@ const getServerInfo = (): MCPServerInfo => ({
   specs: {
     mcp: "0.1.0",
   },
+  capabilities: {
+    tools: {
+      listChanged: false,
+    },
+  },
   tools: toolRegistry.getAllTools(),
 });
 

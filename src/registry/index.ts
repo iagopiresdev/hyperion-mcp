@@ -11,6 +11,22 @@ export { InMemoryToolRegistry } from "./toolRegistry";
 
 const registryLogger = logger.child({ component: "tool-registry" });
 
+/**
+ * Represents an error that occurred during the execution of a tool's logic,
+ * distinct from protocol errors. These should be reported within the result.
+ */
+export class ToolExecutionError extends Error {
+  public readonly isToolExecutionError = true;
+  public readonly content: any;
+
+  constructor(message: string, content?: any, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "ToolExecutionError";
+    this.content = content || [{ type: "text", text: message }];
+    Object.setPrototypeOf(this, ToolExecutionError.prototype);
+  }
+}
+
 export function registerTool(
   name: string,
   description: string,
@@ -49,7 +65,6 @@ export async function executeTool(
 ): Promise<MCPToolResponse> {
   const handler = toolRegistry.getToolHandler(name);
   if (!handler) {
-    // This case should ideally be caught earlier, but handle defensively
     registryLogger.error(
       `Attempted to execute non-existent/disabled tool: ${name}`
     );
@@ -65,7 +80,7 @@ export async function executeTool(
 
     // Helper to send JSON-RPC formatted data to the stream
     const sendJsonRpc = (data: any) => {
-      streamController.enqueue(encoder.encode(JSON.stringify(data) + "\\n"));
+      streamController.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
     };
 
     try {
@@ -86,40 +101,76 @@ export async function executeTool(
         return result;
       }
     } catch (error: any) {
-      registryLogger.error(
-        `Streaming execution failed for tool '${name}'. JSON-RPC ID: ${jsonRpcId}`,
-        error
-      );
-      // Send a JSON-RPC error object
-      let jsonRpcErrorCode = -32603;
-      let jsonRpcErrorMessage = "Internal server error during tool execution.";
-      if (error instanceof z.ZodError) {
-        jsonRpcErrorCode = -32602;
-        jsonRpcErrorMessage = `Invalid parameters for tool '${name}': ${error.errors
-          .map((e) => `${e.path.join(".")} - ${e.message}`)
-          .join(", ")}`;
+      if (error instanceof ToolExecutionError) {
+        registryLogger.warn(
+          `Tool '${name}' execution failed (ToolExecutionError - streaming)`,
+          error
+        );
+        sendJsonRpc({
+          jsonrpc: "2.0",
+          result: {
+            content: error.content,
+            metadata: { isError: true, final: true, partial: false },
+          },
+          id: jsonRpcId === undefined ? null : jsonRpcId,
+        });
       } else {
-        jsonRpcErrorMessage = error.message || jsonRpcErrorMessage;
+        registryLogger.error(
+          `Streaming execution failed for tool '${name}'. JSON-RPC ID: ${jsonRpcId}`,
+          error
+        );
+        let jsonRpcErrorCode = -32603;
+        let jsonRpcErrorMessage =
+          "Internal server error during tool execution.";
+        if (error instanceof z.ZodError) {
+          jsonRpcErrorCode = -32602;
+          jsonRpcErrorMessage = `Invalid parameters for tool '${name}': ${error.errors
+            .map((e) => `${e.path.join(".")} - ${e.message}`)
+            .join(", ")}`;
+        } else {
+          jsonRpcErrorMessage = error.message || jsonRpcErrorMessage;
+        }
+        sendJsonRpc({
+          jsonrpc: "2.0",
+          error: {
+            code: jsonRpcErrorCode,
+            message: jsonRpcErrorMessage,
+            data:
+              config.server.environment === "development"
+                ? error.stack
+                : undefined,
+          },
+          id: jsonRpcId === undefined ? null : jsonRpcId,
+        });
       }
-
-      sendJsonRpc({
-        jsonrpc: "2.0",
-        error: {
-          code: jsonRpcErrorCode,
-          message: jsonRpcErrorMessage,
-          data:
-            config.server.environment === "development"
-              ? error.stack
-              : undefined,
-        },
-        id: jsonRpcId === undefined ? null : jsonRpcId,
-      });
       streamController.terminate();
-      throw error;
+      if (!(error instanceof ToolExecutionError)) {
+        throw error;
+      }
+      return { content: error.content, metadata: { isError: true } };
     }
   } else {
     // Standard non-streaming execution
     registryLogger.debug(`Executing tool '${name}' in non-streaming mode`);
-    return handler(parameters);
+    try {
+      return await handler(parameters);
+    } catch (error: any) {
+      if (error instanceof ToolExecutionError) {
+        registryLogger.warn(
+          `Tool '${name}' execution failed (ToolExecutionError - non-streaming)`,
+          error
+        );
+        return {
+          content: error.content,
+          metadata: { isError: true },
+        };
+      } else {
+        registryLogger.error(
+          `Non-streaming execution failed for tool '${name}' (protocol error)`,
+          error
+        );
+        throw error;
+      }
+    }
   }
 }

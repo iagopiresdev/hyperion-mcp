@@ -79,12 +79,17 @@ export interface MCPServerInfo {
   description: string;
   tools: MCPTool[];
   resources?: MCPResource[];
-  // Additional fields
   vendor?: string;
   contact?: string;
   specs?: {
     mcp: string;
     [key: string]: string;
+  };
+  capabilities?: {
+    tools?: {
+      listChanged?: boolean;
+    };
+    [key: string]: any;
   };
 }
 
