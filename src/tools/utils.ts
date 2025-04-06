@@ -1,115 +1,127 @@
 import type { MCPToolResponse } from "../types/mcp";
 
 /**
- * A wrapper for tool handlers to enable streaming responses
- * Allows tools to incrementally return parts of a response
+ * A wrapper for tool handlers to enable streaming JSON-RPC responses.
+ * Allows tools to incrementally return parts of a response formatted correctly.
  */
 export class StreamingToolResponse {
   private controller?: TransformStreamDefaultController;
   private encoder = new TextEncoder();
   private isComplete = false;
+  private jsonRpcId: string | number | null | undefined;
 
   /**
    * Create a new streaming tool response
    * @param streamController The transform stream controller to write to
+   * @param jsonRpcId The original JSON-RPC request ID
    */
-  constructor(streamController?: TransformStreamDefaultController) {
+  constructor(
+    streamController?: TransformStreamDefaultController,
+    jsonRpcId?: string | number | null // Added jsonRpcId
+  ) {
     this.controller = streamController;
+    // Store the ID, default to null if undefined (per JSON-RPC spec for errors without ID)
+    this.jsonRpcId = jsonRpcId === undefined ? null : jsonRpcId;
   }
 
   /**
-   * Send a partial result to the client
+   * Send a partial result to the client as a JSON-RPC response.
    * @param content The content to stream
    * @param metadata Optional metadata to include
    */
   send(content: any, metadata?: Record<string, any>): void {
-    if (this.isComplete) {
+    if (this.isComplete || !this.controller) {
       console.warn(
-        "Attempting to send data after streaming response is complete"
+        "Attempting to send data when streaming is complete or not enabled."
       );
       return;
     }
 
-    if (!this.controller) {
-      console.warn("Streaming not enabled for this response");
-      return;
-    }
-
-    const response: MCPToolResponse = {
+    const toolResult: MCPToolResponse = {
       content,
       metadata: {
         ...metadata,
-        partial: true,
+        partial: true, // Indicate this is an intermediate chunk
         timestamp: new Date().toISOString(),
       },
     };
 
+    const jsonRpcResponse = {
+      jsonrpc: "2.0",
+      result: toolResult,
+      id: this.jsonRpcId,
+    };
+
     this.controller.enqueue(
-      this.encoder.encode(JSON.stringify(response) + "\n")
+      this.encoder.encode(JSON.stringify(jsonRpcResponse) + "\n")
     );
   }
 
   /**
-   * Complete the streaming response
+   * Complete the streaming response with the final result as a JSON-RPC response.
    * @param finalContent The final content to send
    * @param metadata Optional metadata to include
    */
   complete(finalContent: any, metadata?: Record<string, any>): void {
-    if (this.isComplete) {
-      console.warn("Streaming response already complete");
+    if (this.isComplete || !this.controller) {
+      console.warn(
+        "Attempting to complete when streaming is complete or not enabled."
+      );
       return;
     }
-
     this.isComplete = true;
 
-    if (!this.controller) {
-      console.warn("Streaming not enabled for this response");
-      return;
-    }
-
-    const response: MCPToolResponse = {
+    const finalToolResult: MCPToolResponse = {
       content: finalContent,
       metadata: {
         ...metadata,
-        partial: false,
+        partial: false, // Indicate this is the final result
         final: true,
         timestamp: new Date().toISOString(),
       },
     };
 
-    this.controller.enqueue(this.encoder.encode(JSON.stringify(response)));
+    const jsonRpcResponse = {
+      jsonrpc: "2.0",
+      result: finalToolResult,
+      id: this.jsonRpcId,
+    };
+
+    this.controller.enqueue(
+      this.encoder.encode(JSON.stringify(jsonRpcResponse) + "\n")
+    );
     this.controller.terminate();
   }
 
   /**
-   * Send an error and complete the streaming response
+   * Send an error as a JSON-RPC error response and complete the stream.
    * @param error The error to send
    */
   error(error: Error | string): void {
-    if (this.isComplete) {
-      console.warn("Streaming response already complete");
+    if (this.isComplete || !this.controller) {
+      console.warn(
+        "Attempting to send error when streaming is complete or not enabled."
+      );
       return;
     }
-
     this.isComplete = true;
 
-    if (!this.controller) {
-      console.warn("Streaming not enabled for this response");
-      return;
-    }
-
     const errorMessage = typeof error === "string" ? error : error.message;
+    const errorCode = -32000;
 
-    const response = {
-      error: errorMessage,
-      metadata: {
-        partial: false,
-        final: true,
-        timestamp: new Date().toISOString(),
+    const jsonRpcErrorResponse = {
+      jsonrpc: "2.0",
+      error: {
+        code: errorCode,
+        message: errorMessage,
+        //TODO: Add error.stack in dev mode
       },
+      id: this.jsonRpcId,
     };
 
-    this.controller.enqueue(this.encoder.encode(JSON.stringify(response)));
+    this.controller.enqueue(
+      this.encoder.encode(JSON.stringify(jsonRpcErrorResponse) + "\n")
+    );
     this.controller.terminate();
   }
 }
@@ -131,7 +143,6 @@ export function createStreamingHandler(
       return handler(params);
     }
 
-    // Creates a streaming response object
     const streamingResponse = new StreamingToolResponse(stream);
 
     try {
@@ -144,7 +155,6 @@ export function createStreamingHandler(
     } catch (error) {
       streamingResponse.error(error as Error);
 
-      // Rethrow to be consistent with non-streaming behavior
       throw error;
     }
   };

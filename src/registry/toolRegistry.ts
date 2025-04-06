@@ -66,9 +66,11 @@ export class InMemoryToolRegistry implements ToolRegistry {
       name: tool.name,
       description: tool.description,
       parameters: tool.parameters,
-      permissionLevel: tool.permissionLevel || "public",
-      category: tool.category,
-      tags: tool.tags,
+      metadata: {
+        permissionLevel: tool.permissionLevel || "public",
+        category: tool.category,
+        tags: tool.tags,
+      },
     };
   }
 
@@ -85,9 +87,11 @@ export class InMemoryToolRegistry implements ToolRegistry {
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters,
-          permissionLevel: tool.permissionLevel || "public",
-          category: tool.category,
-          tags: tool.tags,
+          metadata: {
+            permissionLevel: tool.permissionLevel || "public",
+            category: tool.category,
+            tags: tool.tags,
+          },
         });
       }
     }
@@ -112,9 +116,11 @@ export class InMemoryToolRegistry implements ToolRegistry {
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters,
-          permissionLevel: tool.permissionLevel || "public",
-          category: tool.category,
-          tags: tool.tags,
+          metadata: {
+            permissionLevel: tool.permissionLevel || "public",
+            category: tool.category,
+            tags: tool.tags,
+          },
         });
       }
     }
@@ -178,9 +184,11 @@ export class InMemoryToolRegistry implements ToolRegistry {
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters,
-          permissionLevel: tool.permissionLevel || "public",
-          category: tool.category,
-          tags: tool.tags,
+          metadata: {
+            permissionLevel: tool.permissionLevel || "public",
+            category: tool.category,
+            tags: tool.tags,
+          },
         });
       }
     }
@@ -202,9 +210,11 @@ export class InMemoryToolRegistry implements ToolRegistry {
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters,
-          permissionLevel: tool.permissionLevel || "public",
-          category: tool.category,
-          tags: tool.tags,
+          metadata: {
+            permissionLevel: tool.permissionLevel || "public",
+            category: tool.category,
+            tags: tool.tags,
+          },
         });
       }
     }

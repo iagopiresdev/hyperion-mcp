@@ -179,19 +179,28 @@ export class AuthService {
     method: AuthMethod;
     credentials: string | null;
   } {
-    // Check for API key in X-API-Key header (preferred)
-    const apiKey = headers.get("X-API-Key");
-    if (apiKey) {
-      return { method: "api_key", credentials: apiKey };
-    }
-
-    // Check for Bearer token in Authorization header
     const authHeader = headers.get("Authorization");
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      return { method: "bearer_token", credentials: authHeader.slice(7) };
+
+    if (authHeader) {
+      // Check specifically for Bearer scheme (case-insensitive)
+      if (authHeader.toLowerCase().startsWith("bearer ")) {
+        const token = authHeader.slice(7).trim();
+        if (token) {
+          return { method: "bearer_token", credentials: token };
+        } else {
+          authLogger.warn(
+            "Authorization header with Bearer scheme found but token is empty."
+          );
+        }
+      } else {
+        // Log if Authorization header is present but not using Bearer scheme
+        authLogger.warn(
+          "Authorization header found but does not use the recommended 'Bearer' scheme."
+        );
+      }
     }
 
-    // No authentication provided
+    // No valid authentication provided
     return { method: "none", credentials: null };
   }
 

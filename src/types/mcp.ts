@@ -1,7 +1,6 @@
 /**
- * MCP Tool Definition
- * Describes a tool capability that an MCP server provides
- * https://modelcontextprotocol.io/quickstart/server
+ * MCP - Protocol Revision: 2025-03-26
+ * https://spec.modelcontextprotocol.io/specification/2025-03-26/
  */
 import type { PermissionLevel } from "../utils/auth";
 
@@ -28,12 +27,14 @@ export interface MCPTool {
     required?: string[];
   };
 
-  // The permission level required to use this tool
-  permissionLevel?: PermissionLevel;
-
-  // Additional metadata
-  category?: string;
-  tags?: string[];
+  // Optional metadata object for custom fields
+  metadata?: {
+    permissionLevel?: PermissionLevel;
+    category?: string;
+    tags?: string[];
+    // Allow other custom metadata
+    [key: string]: any;
+  };
 }
 
 /**
