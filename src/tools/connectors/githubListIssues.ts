@@ -146,6 +146,7 @@ registerTool(
     required: ["owner", "repo"],
   },
   githubListIssues,
+  "public",
   {
     category: "connectors",
     tags: ["github", "issues", "api", "read"],

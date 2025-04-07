@@ -50,7 +50,8 @@ async function slowTaskHandler(
  */
 export async function slowTaskStreamingHandler(
   params: Record<string, any>,
-  controller?: TransformStreamDefaultController
+  controller?: TransformStreamDefaultController,
+  jsonRpcId?: string | number | null
 ): Promise<MCPToolResponse> {
   const items = params.items || 5;
   const delay = params.delay || 1000;
@@ -61,8 +62,7 @@ export async function slowTaskStreamingHandler(
     return slowTaskHandler(params);
   }
 
-  // Create a streaming response handler
-  const streaming = new StreamingToolResponse(controller);
+  const streaming = new StreamingToolResponse(controller, jsonRpcId);
   const results = [];
 
   try {
@@ -140,13 +140,11 @@ export async function slowTaskStreamingHandler(
       },
     };
   } catch (error) {
-    // Handle errors by sending an error message
     streaming.error(error as Error);
     throw error;
   }
 }
 
-// Register the tool with the registry
 registerTool(
   "slow_task",
   "Process items slowly, with optional streaming progress updates",
@@ -176,6 +174,7 @@ registerTool(
     required: [],
   },
   slowTaskStreamingHandler,
+  undefined,
   {
     category: "demo",
     tags: ["streaming", "example"],

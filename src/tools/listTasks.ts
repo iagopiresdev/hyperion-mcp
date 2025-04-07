@@ -23,7 +23,7 @@ export async function listTasks(
     return {
       content: tasks,
       metadata: {
-        count: tasks.length,
+        count: (await tasks).length,
         status,
         timestamp: new Date().toISOString(),
       },
@@ -55,6 +55,7 @@ registerTool(
     required: [],
   },
   listTasks,
+  "public",
   {
     category: "tasks",
     tags: ["read", "query", "list"],

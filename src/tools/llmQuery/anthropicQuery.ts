@@ -384,6 +384,7 @@ registerTool(
     required: ["prompt"],
   },
   anthropicQueryHandler,
+  "public",
   {
     category: "ai",
     tags: ["llm", "anthropic", "claude", "streaming"],

@@ -4,6 +4,12 @@ import { config } from "../../utils/config";
 import { logger } from "../../utils/logger";
 import { getPineconeIndex } from "../../utils/pineconeClient";
 
+const isPineconeEnabled = !!(
+  process.env.PINECONE_API_KEY &&
+  config.pinecone.indexName &&
+  config.apiKeys.openai
+);
+
 const searchLogger = logger.child({ component: "pinecone-search" });
 
 const DEFAULT_EMBEDDING_MODEL = "text-embedding-3-small";
@@ -191,10 +197,9 @@ const parametersSchema = {
 };
 
 const registrationOptions = {
-  //TODO: Optional categorization
-  // category: 'search',
-  //TODO: Optional tags
-  // tags: ['vector', 'semantic', 'pinecone', 'search']
+  category: "search",
+  tags: ["vector", "pinecone", "search", "query", "embedding"],
+  enabled: isPineconeEnabled,
 };
 
 registerTool(
@@ -202,6 +207,7 @@ registerTool(
   "Performs semantic search on a knowledge base using Pinecone vector database.",
   parametersSchema,
   pineconeSearchHandler,
+  undefined,
   registrationOptions
 );
 

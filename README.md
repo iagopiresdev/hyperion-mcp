@@ -49,8 +49,53 @@ We believe this combination offers a compelling balance, providing elite perform
 1.  **Prerequisites**: Bun (`v1.1+`), Node.js (optional), Database (e.g., Supabase), API keys for desired tools.
 2.  **Install**: `git clone <repo> && cd hyperion-mcp && bun install`
 3.  **Configure**: Copy `.env.example` to `.env` and add your DB credentials/API keys.
-4.  **Database**: Set up required tables (e.g., `api_keys`, `tasks`).
-5.  **Run**: `bun run dev` (Server at `http://localhost:3333`, docs at `/docs`).
+4.  **Database**: Set up required tables (e.g., `api_keys`, `tasks`) in your Supabase/Postgres database using the SQL commands below:
+
+    ```sql
+    -- Optional: Ensure pgcrypto for uuid_generate_v4() is enabled
+    -- CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+    -- Tasks Table (Example)
+    CREATE TABLE IF NOT EXISTS tasks (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        title TEXT NOT NULL CHECK (char_length(title) > 0),
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed')),
+        due_date TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    -- Optional: Trigger to update timestamp
+    -- CREATE OR REPLACE FUNCTION update_updated_at_column()...;
+    -- CREATE TRIGGER update_tasks_updated_at...;
+
+    -- API Keys Table (Required for Auth)
+    CREATE TABLE IF NOT EXISTS api_keys (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        key_hash TEXT NOT NULL UNIQUE, -- Stores the bcrypt hash of the key
+        client_id TEXT NOT NULL UNIQUE, -- Unique identifier provided by the client (e.g., 'user-123')
+        client_name TEXT NOT NULL,
+        permissions TEXT NOT NULL CHECK (permissions IN ('public', 'protected', 'admin')),
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        metadata JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        last_used_at TIMESTAMPTZ
+    );
+    -- Index for efficient validation lookup
+    CREATE INDEX IF NOT EXISTS idx_api_keys_client_id ON api_keys(client_id);
+    CREATE INDEX IF NOT EXISTS idx_api_keys_enabled ON api_keys(enabled);
+
+    -- Note: Review Supabase RLS policies. Ensure only the service role
+    -- can access the api_keys table directly.
+    ```
+
+5.  **API Key Management**: Since there is no built-in admin UI yet, you need to manually add API keys to the `api_keys` table or use a script.
+    - Generate a strong API key (e.g., using `openssl rand -base64 32`).
+    - Hash the key using a tool or script that employs `bcrypt` with appropriate salt rounds (e.g., 10).
+    - `INSERT` the `key_hash`, a unique `client_id`, `client_name`, and `permissions` into the `api_keys` table.
+    - When making requests, provide the **original (unhashed) API key** in the `Authorization: Bearer` header and the corresponding `client_id` in the `X-Client-ID` header.
+    - _(TODO: Add a simple CLI script for key generation/hashing/insertion)._
+6.  **Run**: `bun run dev` (Server at `http://localhost:3333`, docs at `/docs`).
 
 ## Target: Full MCP Conformance & Performance Leadership
 

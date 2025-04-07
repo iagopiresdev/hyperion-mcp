@@ -56,6 +56,7 @@ registerTool(
     required: ["id"],
   },
   completeTask,
+  "public",
   {
     category: "tasks",
     tags: ["write", "update"],

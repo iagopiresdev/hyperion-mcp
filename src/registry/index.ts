@@ -1,7 +1,6 @@
 import { z } from "zod";
 import type { MCPToolResponse } from "../types/mcp";
 import type { PermissionLevel } from "../utils/auth";
-import { config } from "../utils/config";
 import { logger } from "../utils/logger";
 import { InMemoryToolRegistry } from "./toolRegistry";
 
@@ -53,14 +52,16 @@ export function registerTool(
  * Execute a registered tool function. Handles both streaming and non-streaming.
  * @param name The name of the tool
  * @param parameters The parameters for the tool
- * @param streamController Optional controller for streaming responses
+ * @param writer Optional writer for streaming responses
+ * @param encoder Optional encoder for streaming responses
  * @param jsonRpcId Optional original request ID for streaming JSON-RPC responses
  * @returns The tool response (if not streaming or for final result structure)
  */
 export async function executeTool(
   name: string,
   parameters: Record<string, any>,
-  streamController?: TransformStreamDefaultController,
+  writer?: WritableStreamDefaultWriter,
+  encoder?: TextEncoder,
   jsonRpcId?: string | number | null
 ): Promise<MCPToolResponse> {
   const handler = toolRegistry.getToolHandler(name);
@@ -71,86 +72,114 @@ export async function executeTool(
     throw new Error(`Tool '${name}' not found or disabled`);
   }
 
-  // If streamController is provided, handle streaming
-  if (streamController) {
+  if (writer && encoder) {
     registryLogger.debug(`Executing tool '${name}' in streaming mode`, {
       jsonRpcId,
     });
-    const encoder = new TextEncoder();
 
-    // Helper to send JSON-RPC formatted data to the stream
-    const sendJsonRpc = (data: any) => {
-      streamController.enqueue(encoder.encode(JSON.stringify(data) + "\n"));
+    const streamControllerForHandler = {
+      _writer: writer,
+      _encoder: encoder,
+      _closed: false,
+      enqueue: function (chunk: Uint8Array) {
+        if (this._closed) return;
+        this._writer.write(chunk).catch((err) => {
+          registryLogger.error(
+            `Stream write error for tool '${name}': ${err.message}`,
+            err
+          );
+          this._closed = true;
+        });
+      },
+      error: function (err: Error) {
+        if (this._closed) return;
+        this._closed = true;
+        const errorPayload =
+          JSON.stringify({
+            jsonrpc: "2.0",
+            error: {
+              code: -32000, // Generic tool execution error for stream
+              message: err.message || "Streaming Error",
+            },
+            id: jsonRpcId === undefined ? null : jsonRpcId,
+          }) + "\n";
+        this._writer.write(this._encoder.encode(errorPayload)).finally(() => {
+          this._writer
+            .close()
+            .catch((closeErr) =>
+              registryLogger.warn(
+                `Error closing writer after stream error: ${closeErr.message}`
+              )
+            );
+        });
+      },
+      terminate: function () {
+        if (this._closed) return;
+        this._closed = true;
+        this._writer
+          .close()
+          .catch((closeErr) =>
+            registryLogger.warn(
+              `Error closing writer on terminate: ${closeErr.message}`
+            )
+          );
+      },
     };
 
-    try {
-      if ((handler as any).length > 1) {
-        registryLogger.debug(`Tool '${name}' handler is stream-aware`);
-        return await (handler as any)(parameters, streamController, jsonRpcId);
-      } else {
-        registryLogger.debug(
-          `Tool '${name}' handler is not stream-aware, wrapping single result.`
-        );
-        const result = await handler(parameters);
-        sendJsonRpc({
-          jsonrpc: "2.0",
-          result: result,
-          id: jsonRpcId === undefined ? null : jsonRpcId,
-        });
-        streamController.terminate();
-        return result;
-      }
-    } catch (error: any) {
-      if (error instanceof ToolExecutionError) {
-        registryLogger.warn(
-          `Tool '${name}' execution failed (ToolExecutionError - streaming)`,
-          error
-        );
-        sendJsonRpc({
-          jsonrpc: "2.0",
-          result: {
-            content: error.content,
-            metadata: { isError: true, final: true, partial: false },
-          },
-          id: jsonRpcId === undefined ? null : jsonRpcId,
-        });
-      } else {
-        registryLogger.error(
-          `Streaming execution failed for tool '${name}'. JSON-RPC ID: ${jsonRpcId}`,
-          error
-        );
-        let jsonRpcErrorCode = -32603;
-        let jsonRpcErrorMessage =
-          "Internal server error during tool execution.";
-        if (error instanceof z.ZodError) {
-          jsonRpcErrorCode = -32602;
-          jsonRpcErrorMessage = `Invalid parameters for tool '${name}': ${error.errors
-            .map((e) => `${e.path.join(".")} - ${e.message}`)
-            .join(", ")}`;
+    (async () => {
+      try {
+        if ((handler as any).length > 2) {
+          registryLogger.debug(
+            `Handler for '${name}' expects controller and ID, passing them.`
+          );
+          (handler as any)(parameters, streamControllerForHandler, jsonRpcId);
+        } else if ((handler as any).length > 1) {
+          registryLogger.debug(
+            `Handler for '${name}' expects controller, passing shim.`
+          );
+          (handler as any)(parameters, streamControllerForHandler);
         } else {
-          jsonRpcErrorMessage = error.message || jsonRpcErrorMessage;
+          registryLogger.warn(
+            `Handler for '${name}' called in streaming mode but doesn't accept controller. Sending single result.`
+          );
+          const result = await handler(parameters);
+          const finalToolResult: MCPToolResponse = {
+            content: result.content,
+            metadata: { ...result.metadata, partial: false, final: true },
+          };
+          const jsonRpcResponse = {
+            jsonrpc: "2.0",
+            result: finalToolResult,
+            id: jsonRpcId === undefined ? null : jsonRpcId,
+          };
+          streamControllerForHandler.enqueue(
+            encoder.encode(JSON.stringify(jsonRpcResponse) + "\n")
+          );
+          streamControllerForHandler.terminate();
         }
-        sendJsonRpc({
-          jsonrpc: "2.0",
-          error: {
-            code: jsonRpcErrorCode,
-            message: jsonRpcErrorMessage,
-            data:
-              config.server.environment === "development"
-                ? error.stack
-                : undefined,
-          },
-          id: jsonRpcId === undefined ? null : jsonRpcId,
-        });
+      } catch (error: any) {
+        registryLogger.error(
+          `Unexpected error initiating streaming handler for tool '${name}'`,
+          error instanceof Error ? error : undefined
+        );
+        try {
+          streamControllerForHandler.error(
+            new Error("Internal server error initiating stream.")
+          );
+        } catch (streamError) {
+          registryLogger.error(
+            "Failed to send error via controller after setup error",
+            streamError instanceof Error ? streamError : undefined
+          );
+        }
       }
-      streamController.terminate();
-      if (!(error instanceof ToolExecutionError)) {
-        throw error;
-      }
-      return { content: error.content, metadata: { isError: true } };
-    }
+    })(); // Fire-and-forget async IIFE
+
+    return Promise.resolve({
+      content: { status: "streaming" },
+      metadata: { partial: true },
+    });
   } else {
-    // Standard non-streaming execution
     registryLogger.debug(`Executing tool '${name}' in non-streaming mode`);
     try {
       return await handler(parameters);
@@ -162,6 +191,21 @@ export async function executeTool(
         );
         return {
           content: error.content,
+          metadata: { isError: true },
+        };
+      } else if (error instanceof z.ZodError) {
+        registryLogger.warn(
+          `Tool '${name}' validation failed (ZodError - non-streaming)`,
+          { errors: error.errors }
+        );
+        return {
+          content: {
+            message: `Validation failed for tool '${name}'`,
+            details: error.errors.map((e) => ({
+              path: e.path.join("."),
+              message: e.message,
+            })),
+          },
           metadata: { isError: true },
         };
       } else {

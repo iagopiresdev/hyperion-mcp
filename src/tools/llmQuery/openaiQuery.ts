@@ -319,6 +319,7 @@ registerTool(
     required: ["prompt"],
   },
   openAIQueryHandler,
+  "public",
   {
     category: "ai",
     tags: ["llm", "openai", "streaming"],

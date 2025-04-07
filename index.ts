@@ -364,39 +364,37 @@ app.post("/invoke", async (c) => {
       const writer = stream.writable.getWriter();
       const encoder = new TextEncoder();
 
-      const streamControllerShim = {
-        enqueue: (chunk: any) => {
-          writer.write(encoder.encode(String(chunk))); // Ensure chunk is string encoded
-        },
-        error: (err: Error) => {
-          // Error should be formatted as JSON-RPC error string by executeToolFunction
+      executeToolFunction(
+        toolName,
+        toolParameters,
+        writer,
+        encoder,
+        requestId
+      ).catch((err) => {
+        toolLogger.error(
+          `Error during executeTool setup for streaming: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+          err instanceof Error ? err : undefined
+        );
+        try {
           const errorPayload =
             JSON.stringify({
               jsonrpc: "2.0",
               error: {
                 code: -32603,
-                message: err.message || "Streaming Error",
+                message: "Server error during streaming setup.",
               },
               id: requestId === undefined ? null : requestId,
             }) + "\n";
           writer.write(encoder.encode(errorPayload));
           writer.close();
-        },
-        terminate: () => {
-          writer.close();
-        },
-      };
-
-      executeToolFunction(
-        toolName,
-        toolParameters,
-        streamControllerShim as any,
-        requestId
-      ).catch((err) => {
-        toolLogger.warn(
-          `Streaming executeToolFunction promise rejected (error likely already sent via stream)`,
-          err
-        );
+        } catch (writeError) {
+          toolLogger.error(
+            "Failed to close writer after setup error",
+            writeError instanceof Error ? writeError : undefined
+          );
+        }
       });
 
       return new Response(stream.readable, {

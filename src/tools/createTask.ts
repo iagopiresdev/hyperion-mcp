@@ -1,5 +1,5 @@
 import { db } from "../db/memory";
-import { registerTool } from "../registry";
+import { registerTool, ToolExecutionError } from "../registry";
 import type { MCPToolResponse } from "../types/mcp";
 import { logger } from "../utils/logger";
 
@@ -14,11 +14,17 @@ export async function createTask(
 ): Promise<MCPToolResponse> {
   try {
     if (!params.title) {
-      throw new Error("Title is required");
+      throw new ToolExecutionError("Title is required", {
+        validationErrors: [{ field: "title", message: "Title is required" }],
+      });
     }
 
     if (params.dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(params.dueDate)) {
-      throw new Error("Due date must be in YYYY-MM-DD format");
+      throw new ToolExecutionError("Due date must be in YYYY-MM-DD format", {
+        validationErrors: [
+          { field: "dueDate", message: "Must be in YYYY-MM-DD format" },
+        ],
+      });
     }
 
     const newTask = db.createTask({
@@ -34,14 +40,19 @@ export async function createTask(
       },
     };
   } catch (error) {
-    if (process.env.NODE_ENV !== "test") {
-      toolLogger.error(
-        `Failed to create task with params: ${JSON.stringify(params)}. Error: ${
-          (error as Error).message
-        }`
-      );
+    if (error instanceof ToolExecutionError) {
+      throw error;
     }
-    throw new Error(`Failed to create task: ${(error as Error).message}`);
+    toolLogger.error(
+      `Unexpected error creating task with params: ${JSON.stringify(
+        params
+      )}. Error: ${error instanceof Error ? error.message : String(error)}`,
+      error instanceof Error ? error : undefined
+    );
+    throw new ToolExecutionError(
+      `Failed to create task due to an unexpected internal error.`,
+      { originalError: error instanceof Error ? error.message : String(error) }
+    );
   }
 }
 
@@ -68,6 +79,7 @@ registerTool(
     required: ["title"],
   },
   createTask,
+  "public",
   {
     category: "tasks",
     tags: ["write", "create"],
