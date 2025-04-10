@@ -25,6 +25,18 @@ hyperion-mcp implements the Model Context Protocol (MCP), an open standard enabl
 - 🔐 **Authentication (Custom)**: Supports API Key + Client ID (via `Authorization: Bearer` + `X-Client-ID`) with bcrypt hashing and a database backend. _(Note: This is a functional interim solution; the goal is full MCP OAuth 2.1 conformance)._
 - 📊 **Observability**: Basic metrics (`/metrics`) and structured logging.
 
+## Key MCP Conformance Gaps
+
+While the core tool invocation mechanism is in place, the following areas require development to achieve full MCP conformance:
+
+- **OAuth 2.1 Authorization**: The current custom API key mechanism needs replacement with the MCP-recommended OAuth 2.1 flow.
+- **MCP `resources`**: The server does not yet implement the `resources` feature for providing contextual data.
+- **MCP `prompts`**: The server does not yet implement the `prompts` feature for templates/workflows.
+- **Protocol Conformance Testing**: A dedicated test suite is needed to validate strict adherence to the specification.
+- **Batch Request Handling**: Explicit support for receiving and processing JSON-RPC batch requests needs verification/implementation.
+- **Standardized Utilities**: Advanced MCP utilities (e.g., Configuration, Progress, Cancellation) are not yet implemented.
+- **STDIO Transport**: Only HTTP transport is currently supported.
+
 ## Available Tools (Examples)
 
 - **Task Management**: `create_task`, `list_tasks`, `complete_task` (requires DB setup).
@@ -103,7 +115,8 @@ The primary goals are full alignment with the latest MCP specification **and** d
 
 - Implementing the recommended **OAuth 2.1 Authorization flow**.
 - Developing a **Protocol Conformance Test Suite**.
-- Implementing **MCP Resources**.
+- Implementing **MCP `resources` and `prompts` features**.
+- Ensuring robust **Batch Request Handling**.
 - Providing a spec-compliant **Client SDK**.
 - Establishing **formal performance benchmarks**.
 
