@@ -1,6 +1,14 @@
 import { describe, expect, it } from "bun:test";
-import { app } from "../index";
+import app from "..";
+import type {
+  ListResourcesResponseResult,
+  ReadResourceResponseResult,
+} from "../src/mcp/types";
 import { toolRegistry } from "../src/registry";
+import type {
+  JsonRpcErrorResponse,
+  JsonRpcSuccessResponse,
+} from "../src/types/json-rpc";
 import { config } from "../src/utils/config";
 
 //TODO: set up in a beforeAll hook using the (future) manage-keys script or direct DB access
@@ -349,4 +357,141 @@ describe("JSON-RPC /invoke Endpoint", () => {
       toolRegistry.unregister("admin_tool_allowed");
     });
   }
+
+  describe("resources/list Method", () => {
+    it("should successfully list available resources", async () => {
+      const payload = {
+        jsonrpc: "2.0",
+        method: "resources/list",
+        id: "res-list-1",
+      };
+      const res = await request(payload, defaultHeaders);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      expect(body.jsonrpc).toBe("2.0");
+      expect(body.id).toBe("res-list-1");
+
+      expect(body.result).toBeDefined();
+      expect(body.error).toBeUndefined();
+
+      const successBody =
+        body as JsonRpcSuccessResponse<ListResourcesResponseResult>;
+      expect(Array.isArray(successBody.result.resources)).toBe(true);
+      expect(
+        successBody.result.resources.some(
+          (r: any) => r.name === "Example Document"
+        )
+      ).toBe(true);
+    });
+
+    it("should ignore parameters passed to resources/list", async () => {
+      const payload = {
+        jsonrpc: "2.0",
+        method: "resources/list",
+        params: { filter: "active" },
+        id: "res-list-params-ignored",
+      };
+      const res = await request(payload, defaultHeaders);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      expect(body.id).toBe("res-list-params-ignored");
+      expect(body.result).toBeDefined();
+      expect(body.error).toBeUndefined();
+    });
+  });
+
+  describe("resources/read Method", () => {
+    it("should successfully read a valid resource", async () => {
+      const payload = {
+        jsonrpc: "2.0",
+        method: "resources/read",
+        params: { uri: "file:///home/user/docs/example.txt" },
+        id: "res-read-1",
+      };
+      const res = await request(payload, defaultHeaders);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      expect(body.jsonrpc).toBe("2.0");
+      expect(body.id).toBe("res-read-1");
+      expect(body.result).toBeDefined();
+      expect(body.error).toBeUndefined();
+
+      const successBody =
+        body as JsonRpcSuccessResponse<ReadResourceResponseResult>;
+      expect(Array.isArray(successBody.result.contents)).toBe(true);
+      expect(successBody.result.contents.length).toBe(1);
+      expect(successBody.result.contents[0].uri).toBe(
+        "file:///home/user/docs/example.txt"
+      );
+      expect(successBody.result.contents[0].text).toBeString();
+    });
+
+    it("should return error for reading a non-existent resource URI", async () => {
+      const payload = {
+        jsonrpc: "2.0",
+        method: "resources/read",
+        params: { uri: "nonexistent://resource" },
+        id: "res-read-err-1",
+      };
+      const res = await request(payload, defaultHeaders);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+
+      expect(body.jsonrpc).toBe("2.0");
+      expect(body.id).toBe("res-read-err-1");
+      expect(body.error).toBeDefined();
+      expect(body.result).toBeUndefined();
+
+      const errorBody = body as JsonRpcErrorResponse;
+      expect(errorBody.error.code).toBe(-32602);
+      expect(errorBody.error.message).toContain("Resource not found");
+    });
+
+    it("should return error if uri parameter is missing", async () => {
+      const payload = {
+        jsonrpc: "2.0",
+        method: "resources/read",
+        params: { name: "some resource" },
+        id: "res-read-err-2",
+      };
+      const res = await request(payload, defaultHeaders);
+      expect(res.status).toBe(400);
+      const body = await res.json();
+
+      expect(body.jsonrpc).toBe("2.0");
+      expect(body.id).toBe("res-read-err-2");
+      expect(body.error).toBeDefined();
+      expect(body.result).toBeUndefined();
+
+      const errorBody = body as JsonRpcErrorResponse;
+      expect(errorBody.error.code).toBe(-32602);
+      expect(errorBody.error.message).toContain("Invalid parameters");
+      expect(errorBody.error.message).toContain("uri - Required");
+    });
+
+    it("should return error if uri parameter is not a valid URI string", async () => {
+      const payload = {
+        jsonrpc: "2.0",
+        method: "resources/read",
+        params: { uri: "not a uri" },
+        id: "res-read-err-3",
+      };
+      const res = await request(payload, defaultHeaders);
+      expect(res.status).toBe(400);
+      const body = await res.json();
+
+      expect(body.jsonrpc).toBe("2.0");
+      expect(body.id).toBe("res-read-err-3");
+      expect(body.error).toBeDefined();
+      expect(body.result).toBeUndefined();
+
+      const errorBody = body as JsonRpcErrorResponse;
+      expect(errorBody.error.code).toBe(-32602);
+      expect(errorBody.error.message).toContain("Invalid parameters");
+      expect(errorBody.error.message).toContain("Invalid url");
+    });
+  });
 });
