@@ -98,6 +98,7 @@ export async function pineconeSearchHandler(
 ): Promise<MCPToolResponse> {
   const queryText = params.query as string;
   const topK = (params.top_k as number) || 5;
+  const namespace = params.namespace as string | undefined;
   const pineconeIndexName = config.pinecone.indexName;
 
   if (!queryText || typeof queryText !== "string") {
@@ -116,47 +117,54 @@ export async function pineconeSearchHandler(
   }
 
   searchLogger.info(
-    `Received Pinecone search request: query="${queryText}", topK=${topK}, index=${pineconeIndexName}`
+    `Received Pinecone search request: query="${queryText}", topK=${topK}, index=${pineconeIndexName}, namespace=${
+      namespace || "(default)"
+    }`
   );
 
   try {
-    // 1. Get the Pinecone index
     const index = getPineconeIndex(pineconeIndexName);
-
-    // 2. Generate embedding for the query
-    // TODO: Make embedding model configurable
     const queryEmbedding = await generateOpenAIEmbedding(queryText);
 
     if (queryEmbedding.length !== EMBEDDING_DIMENSIONS) {
-      // This check might be overly strict depending on model variations
       searchLogger.warn(
         `Generated embedding dimension (${queryEmbedding.length}) differs from expected (${EMBEDDING_DIMENSIONS}) for index ${pineconeIndexName}`
       );
     }
 
-    // 3. Query Pinecone
-    searchLogger.info(`Querying Pinecone index ${pineconeIndexName}...`);
-    const queryResponse = await index.query({
+    //FIXME: type this
+    const queryRequest: any = {
       vector: queryEmbedding,
       topK: topK,
-      includeMetadata: true, // Fetch metadata associated with vectors
-      includeValues: false, // Usually don't need the vectors themselves back
+      includeMetadata: true,
+      includeValues: false,
       // TODO: Add metadata filtering based on params.filter if implemented
-    });
+    };
+
+    if (namespace) {
+      queryRequest.namespace = namespace;
+    }
+
+    searchLogger.info(
+      `Querying Pinecone index ${pineconeIndexName}${
+        namespace ? " in namespace " + namespace : ""
+      }...`,
+      { queryRequest }
+    );
+    const queryResponse = await index.query(queryRequest);
+
     searchLogger.info(
       `Pinecone query completed. Found ${
         queryResponse.matches?.length ?? 0
       } matches.`
     );
 
-    // 4. Format results
     const results =
       queryResponse.matches?.map((match) => ({
         id: match.id,
         score: match.score,
-        // Assuming metadata contains the original text or relevant info
         metadata: match.metadata,
-        // You might want to explicitly pull 'text' from metadata if stored there
+        // TODO: explicitly pull text from metadata if stored there
         // text: match.metadata?.text as string | undefined
       })) || [];
 
@@ -166,7 +174,8 @@ export async function pineconeSearchHandler(
       },
       metadata: {
         indexName: pineconeIndexName,
-        modelUsed: DEFAULT_EMBEDDING_MODEL, // TODO: Reflect actual model if configurable
+        namespace: namespace,
+        modelUsed: DEFAULT_EMBEDDING_MODEL,
         timestamp: new Date().toISOString(),
       },
     };
@@ -186,6 +195,10 @@ const parametersSchema = {
     top_k: {
       type: "number" as const,
       description: "The number of top results to return (default: 5).",
+    },
+    namespace: {
+      type: "string" as const,
+      description: "Optional namespace within the index to search.",
     },
     //TODO: Potential future filters based on metadata could be added here
     // filter: {
