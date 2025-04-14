@@ -21,7 +21,8 @@ hyperion-mcp implements the Model Context Protocol (MCP), an open standard enabl
 - 🧩 **Tool Definitions**: Supports `name`, `description`, `parameters` (JSON Schema), and `metadata`.
 - 🔄 **Streaming**: Handles streaming responses via JSON Lines containing JSON-RPC objects.
 - ⚠️ **MCP Error Handling**: Distinguishes protocol errors (JSON-RPC `error`) and tool execution errors (`result.metadata.isError`).
-- 📡 **Server Capabilities**: Declares supported features (e.g., `tools`) via the `/` endpoint.
+- 📡 **Server Capabilities**: Declares supported features (`tools`, `resources`) via the `/` endpoint.
+- 📖 **MCP Resources**: Basic support for `resources/list` and `resources/read` (updates/subscriptions not yet implemented).
 - 🔐 **Authentication (Custom)**: Supports API Key + Client ID (via `Authorization: Bearer` + `X-Client-ID`) with bcrypt hashing and a database backend. _(Note: This is a functional interim solution; the goal is full MCP OAuth 2.1 conformance)._
 - 📊 **Observability**: Basic metrics (`/metrics`) and structured logging.
 
@@ -29,9 +30,9 @@ hyperion-mcp implements the Model Context Protocol (MCP), an open standard enabl
 
 While the core tool invocation mechanism is in place, the following areas require development to achieve full MCP conformance:
 
-- **OAuth 2.1 Authorization**: The current custom API key mechanism needs replacement with the MCP-recommended OAuth 2.1 flow.
-- **MCP `resources`**: The server does not yet implement the `resources` feature for providing contextual data.
-- **MCP `prompts`**: The server does not yet implement the `prompts` feature for templates/workflows.
+- **OAuth 2.1 Authorization**: Current custom API key auth needs replacement with the MCP-recommended OAuth 2.1 flow.
+- **MCP `resources`**: Basic list/read implemented. Resource update notifications (`notifications/resources/list_changed`) and content subscriptions (`resources/subscribe`, etc.) are pending.
+- **MCP `prompts`**: Feature not yet implemented.
 - **Protocol Conformance Testing**: A dedicated test suite is needed to validate strict adherence to the specification.
 - **Batch Request Handling**: Explicit support for receiving and processing JSON-RPC batch requests needs verification/implementation.
 - **Standardized Utilities**: Advanced MCP utilities (e.g., Configuration, Progress, Cancellation) are not yet implemented.
@@ -113,9 +114,9 @@ We believe this combination offers a compelling balance, providing elite perform
 
 The primary goals are full alignment with the latest MCP specification **and** demonstrating top-tier performance among conformant servers. Key next steps include:
 
-- Implementing the recommended **OAuth 2.1 Authorization flow**.
+- Implementing the **MCP-recommended OAuth 2.1 Authorization flow**.
 - Developing a **Protocol Conformance Test Suite**.
-- Implementing **MCP `resources` and `prompts` features**.
+- Implementing the **MCP `prompts` feature** and **Resource Updates/Subscriptions**.
 - Ensuring robust **Batch Request Handling**.
 - Providing a spec-compliant **Client SDK**.
 - Establishing **formal performance benchmarks**.
