@@ -133,25 +133,22 @@ export async function pineconeSearchHandler(
     }
 
     //FIXME: type this
-    const queryRequest: any = {
+    const queryRequestCore: any = {
       vector: queryEmbedding,
       topK: topK,
       includeMetadata: true,
       includeValues: false,
-      // TODO: Add metadata filtering based on params.filter if implemented
     };
 
-    if (namespace) {
-      queryRequest.namespace = namespace;
-    }
+    const indexToQuery = namespace ? index.namespace(namespace) : index;
 
     searchLogger.info(
       `Querying Pinecone index ${pineconeIndexName}${
         namespace ? " in namespace " + namespace : ""
       }...`,
-      { queryRequest }
+      { queryRequestCore }
     );
-    const queryResponse = await index.query(queryRequest);
+    const queryResponse = await indexToQuery.query(queryRequestCore);
 
     searchLogger.info(
       `Pinecone query completed. Found ${

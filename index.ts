@@ -25,6 +25,15 @@ import { createJsonRpcErrorResponse } from "./src/utils/jsonrpc_helpers";
 import { logger as serverLogger } from "./src/utils/logger";
 import { metrics } from "./src/utils/metrics";
 
+import "./src/tools/completeTask";
+import "./src/tools/connectors/fileSystem";
+import "./src/tools/connectors/webBrowser";
+import "./src/tools/createTask";
+import "./src/tools/example/slowTask";
+import "./src/tools/listTasks";
+import "./src/tools/llmQuery/openaiQuery";
+import "./src/tools/vectorSearch/pineconeSearchTool";
+
 type AppContext = {
   requestStartTime?: number;
   requestId?: string;
