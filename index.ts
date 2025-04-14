@@ -1,9 +1,16 @@
-import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { prettyJSON } from "hono/pretty-json";
 import { z } from "zod";
 import { notFound } from "./src/handlers/notFound";
+import {
+  handleListResources,
+  handleReadResource,
+} from "./src/handlers/resource_handlers";
+import {
+  ListResourcesRequestSchema,
+  ReadResourceRequestSchema,
+} from "./src/mcp/types";
 import type { AuthContext } from "./src/middleware/auth";
 import { authentication } from "./src/middleware/auth";
 import { metricsHandler, requestMetrics } from "./src/middleware/metrics";
@@ -11,40 +18,32 @@ import {
   executeTool as executeToolFunction,
   toolRegistry,
 } from "./src/registry";
-import { registerToolsFromDirectory } from "./src/registry/toolLoader";
 import type { MCPServerInfo } from "./src/types/mcp";
 import { authService } from "./src/utils/auth";
 import { config } from "./src/utils/config";
-import { logger } from "./src/utils/logger";
+import { createJsonRpcErrorResponse } from "./src/utils/jsonrpc_helpers";
+import { logger as serverLogger } from "./src/utils/logger";
 import { metrics } from "./src/utils/metrics";
-
-// Tools
-import "./src/tools/completeTask";
-import "./src/tools/connectors/fileSystem";
-import "./src/tools/connectors/webBrowser";
-import "./src/tools/createTask";
-import "./src/tools/example/slowTask";
-import "./src/tools/listTasks";
-import "./src/tools/llmQuery/openaiQuery";
 
 type AppContext = {
   requestStartTime?: number;
   requestId?: string;
 } & AuthContext;
 
-const serverLogger = logger.child({ component: "server" });
-export const app = new Hono<{ Variables: AppContext }>();
+const app = new Hono<{ Variables: AppContext }>();
 
 app.use("*", async (c, next) => {
   await next();
   serverLogger.debug(`${c.req.method} ${c.req.path} - ${c.res.status}`);
 });
+
 app.use("*", prettyJSON());
+
 app.use(
   "*",
   cors({
     origin: "*",
-    allowHeaders: ["Content-Type", "Authorization", "X-API-Key"],
+    allowHeaders: ["Content-Type", "Authorization", "X-API-Key", "X-Client-ID"],
     allowMethods: ["POST", "GET", "OPTIONS"],
     exposeHeaders: ["Content-Type"],
     maxAge: 600,
@@ -70,29 +69,13 @@ app.use("*", (c, next) => {
   return next();
 });
 
-// --- JSON-RPC Schemas --- //
-const JsonRpcIdSchema = z.union([z.string(), z.number(), z.null()]);
-
-const JsonRpcRequestSchema = z.object({
-  jsonrpc: z.literal("2.0"),
-  method: z.string().min(1, "Method (tool name) is required"),
-  params: z.record(z.any()).optional().default({}),
-  id: JsonRpcIdSchema.optional(),
-});
-
-const JsonRpcErrorObjectSchema = z.object({
-  code: z.number().int(),
-  message: z.string(),
-  data: z.any().optional(),
-});
-
 const getServerInfo = (): MCPServerInfo => ({
   name: "hyperion-mcp",
   version: "0.1.0",
   description:
     "High-performance Model Context Protocol (MCP) server built with Node.js and Hono",
   vendor: "hyperion-mcp",
-  contact: "https://github.com/your-username/hyperion-mcp",
+  contact: "https://github.com/hyperion-mcp",
   specs: {
     mcp: "0.1.0",
   },
@@ -100,6 +83,7 @@ const getServerInfo = (): MCPServerInfo => ({
     tools: {
       listChanged: false,
     },
+    resources: {},
   },
   tools: toolRegistry.getAllTools(),
 });
@@ -167,7 +151,7 @@ app.get("/docs", (c) => {
   }'</pre>
             <h4>Example JSON-RPC Usage (Streaming)</h4>
             <pre>curl -X POST http://localhost:3333/invoke \\
-  -H "Content-Type: application/json" \\
+  -H "Content-Type": application/json" \\
   -H "Authorization: Bearer YOUR_API_KEY" \\  # If auth enabled
   -d '{
     "jsonrpc": "2.0",
@@ -186,7 +170,6 @@ app.get("/docs", (c) => {
 
 app.get("/metrics", metricsHandler);
 
-// --- Tool Invocation Endpoints --- //
 app.post("/invoke", async (c) => {
   let requestBody: any;
   let jsonRpcId: string | number | null | undefined = undefined;
@@ -199,138 +182,182 @@ app.post("/invoke", async (c) => {
     ) {
       jsonRpcId = requestBody.id;
     }
+
+    if (jsonRpcId === null) {
+      return c.json(
+        createJsonRpcErrorResponse(
+          null,
+          -32600,
+          "Invalid Request: MCP requires non-null 'id' for requests."
+        ),
+        400
+      );
+    }
   } catch (e) {
     return c.json(
-      {
-        jsonrpc: "2.0",
-        error: { code: -32700, message: "Parse error: Invalid JSON received." },
-        id: null,
-      },
+      createJsonRpcErrorResponse(
+        null,
+        -32700,
+        "Parse error: Invalid JSON received."
+      ),
       400
     );
   }
+
+  const JsonRpcIdSchema = z.union([z.string(), z.number(), z.null()]);
+  const JsonRpcRequestSchema = z.object({
+    jsonrpc: z.literal("2.0"),
+    method: z.string().min(1, "Method (tool name) is required"),
+    params: z.record(z.any()).optional().default({}),
+    id: JsonRpcIdSchema.optional(),
+  });
 
   const parsedRequest = JsonRpcRequestSchema.safeParse(requestBody);
 
   if (!parsedRequest.success) {
     return c.json(
-      {
-        jsonrpc: "2.0",
-        error: {
-          code: -32600,
-          message: `Invalid JSON-RPC Request: ${parsedRequest.error.errors
-            .map((e) => `${e.path.join(".")} - ${e.message}`)
-            .join(", ")}`,
-          data: parsedRequest.error.format(),
-        },
-        id: jsonRpcId === undefined ? null : jsonRpcId,
-      },
+      createJsonRpcErrorResponse(
+        jsonRpcId === undefined ? null : jsonRpcId,
+        -32600,
+        `Invalid JSON-RPC Request: ${parsedRequest.error.errors
+          .map((e) => `${e.path.join(".")} - ${e.message}`)
+          .join(", ")}`,
+        parsedRequest.error.format()
+      ),
       400
     );
   }
 
-  const {
-    method: toolName,
-    params: parameters,
-    id: requestId,
-  } = parsedRequest.data;
+  const { method, params, id: requestId } = parsedRequest.data;
   const serverRequestId = c.get("requestId");
 
-  const toolLogger = serverLogger.child({
-    tool: toolName,
+  const logger = serverLogger.child({
+    method,
     internalRequestId: serverRequestId,
     jsonRpcId: requestId,
   });
 
+  if (method === "resources/list") {
+    logger.info("Handling resources/list request");
+    try {
+      ListResourcesRequestSchema.parse(params);
+      const response = await handleListResources(params || {}, requestId!);
+      return c.json(response);
+    } catch (error: any) {
+      logger.error("Error handling resources/list", error);
+      return c.json(
+        createJsonRpcErrorResponse(
+          requestId!,
+          -32603,
+          `Internal server error handling resources/list: ${error.message}`
+        ),
+        500
+      );
+    }
+  }
+  if (method === "resources/read") {
+    logger.info("Handling resources/read request");
+    try {
+      const validatedParams = ReadResourceRequestSchema.parse(params);
+      const response = await handleReadResource(validatedParams, requestId!);
+      return c.json(response);
+    } catch (error: any) {
+      logger.error("Error handling resources/read", error);
+      const errorCode = error instanceof z.ZodError ? -32602 : -32603;
+      const errorMessage =
+        error instanceof z.ZodError
+          ? `Invalid parameters for resources/read: ${error.errors
+              .map((e) => `${e.path.join(".")} - ${e.message}`)
+              .join(", ")}`
+          : `Internal server error handling resources/read: ${error.message}`;
+      return c.json(
+        createJsonRpcErrorResponse(
+          requestId!,
+          errorCode,
+          errorMessage,
+          error instanceof z.ZodError ? error.format() : undefined
+        ),
+        errorCode === -32602 ? 400 : 500
+      );
+    }
+  }
+
+  const toolName = method;
+  const toolLogger = logger;
+  const parameters = params;
+
   if (!toolRegistry.isToolRegistered(toolName)) {
-    toolLogger.warn("Unknown tool requested");
+    toolLogger.warn("Unknown method/tool requested");
     return c.json(
-      {
-        jsonrpc: "2.0",
-        error: {
-          code: -32601,
-          message: `Method not found: Tool '${toolName}' is not available.`,
-          data: {
-            availableTools: toolRegistry.getAllTools().map((t) => t.name),
-          },
-        },
-        id: requestId === undefined ? null : requestId,
-      },
+      createJsonRpcErrorResponse(
+        requestId!,
+        -32601,
+        `Method not found: Method or Tool '${toolName}' is not available.`,
+        {
+          availableMethods: [
+            "resources/list",
+            "resources/read",
+            ...toolRegistry.getAllTools().map((t) => t.name),
+          ],
+        }
+      ),
       404
     );
   }
 
-  // --- Authorization Check --- //
   if (config.auth.enableAuth) {
     const auth = c.get("auth") as AuthContext["auth"];
-    // Ensure auth context was set by middleware (it should be if auth is enabled)
     if (!auth) {
       toolLogger.error(
         "Auth context missing despite auth being enabled. Check middleware order."
       );
       return c.json(
-        {
-          jsonrpc: "2.0",
-          error: {
-            code: -32603,
-            message: "Internal Server Error: Auth context missing.",
-          },
-          id: requestId === undefined ? null : requestId,
-        },
+        createJsonRpcErrorResponse(
+          requestId!,
+          -32603,
+          "Internal Server Error: Auth context missing."
+        ),
         500
       );
     }
-
-    const tool = toolRegistry.getToolDefinition(toolName); // We know tool exists here
-    //TODO: Should ideally check if tool is undefined, though isToolRegistered passed
+    const tool = toolRegistry.getToolDefinition(toolName);
     if (!tool) {
       toolLogger.error(
         `Tool definition not found for '${toolName}' despite being registered.`
       );
       return c.json(
-        {
-          jsonrpc: "2.0",
-          error: {
-            code: -32603,
-            message: "Internal Server Error: Tool definition missing.",
-          },
-          id: requestId === undefined ? null : requestId,
-        },
+        createJsonRpcErrorResponse(
+          requestId!,
+          -32603,
+          "Internal Server Error: Tool definition missing."
+        ),
         500
       );
     }
-
     const requiredPermission = tool.metadata?.permissionLevel || "public";
-
     const clientInfo = auth.isAuthenticated
       ? {
           id: auth.clientId!,
           name: auth.clientName!,
-          permissions: auth.permissions as any, // TODO: Refine 'any' type if possible
+          permissions: auth.permissions as any,
         }
       : null;
-
     const hasPermission = authService.hasPermission(
       clientInfo,
       requiredPermission
     );
-
     if (!hasPermission) {
       toolLogger.warn("Unauthorized tool access attempt (JSON-RPC)", {
         toolName,
         clientId: auth.clientId,
         requiredPermission,
       });
-
       return c.json(
-        {
-          jsonrpc: "2.0",
-          error: {
-            code: -32000,
-            message: `Access Denied: Insufficient permissions to use tool '${toolName}'. Required: ${requiredPermission}.`,
-          },
-          id: requestId === undefined ? null : requestId,
-        },
+        createJsonRpcErrorResponse(
+          requestId!,
+          -32000,
+          `Access Denied: Insufficient permissions to use tool '${toolName}'. Required: ${requiredPermission}.`
+        ),
         403
       );
     }
@@ -339,12 +366,10 @@ app.post("/invoke", async (c) => {
       clientId: auth.clientId,
     });
   }
-  const wantsStreaming = parameters?.stream === true;
 
+  const wantsStreaming = parameters?.stream === true;
   const toolParameters = { ...parameters };
-  if (wantsStreaming) {
-    delete toolParameters.stream;
-  }
+  if (wantsStreaming) delete toolParameters.stream;
 
   toolLogger.info(
     `JSON-RPC tool execution ${
@@ -353,7 +378,6 @@ app.post("/invoke", async (c) => {
     { parameters: toolParameters }
   );
 
-  // --- Execute Tool (Streaming or Non-Streaming) --- //
   if (wantsStreaming) {
     toolLogger.debug("Initiating streaming response for JSON-RPC request", {
       toolName,
@@ -363,7 +387,6 @@ app.post("/invoke", async (c) => {
       const stream = new TransformStream();
       const writer = stream.writable.getWriter();
       const encoder = new TextEncoder();
-
       executeToolFunction(
         toolName,
         toolParameters,
@@ -396,7 +419,6 @@ app.post("/invoke", async (c) => {
           );
         }
       });
-
       return new Response(stream.readable, {
         headers: {
           "Content-Type": "application/jsonl",
@@ -407,14 +429,12 @@ app.post("/invoke", async (c) => {
     } catch (error: any) {
       toolLogger.error(`Error setting up streaming response`, error);
       return c.json(
-        {
-          jsonrpc: "2.0",
-          error: {
-            code: -32603,
-            message: "Internal server error setting up stream.",
-          },
-          id: requestId === undefined ? null : requestId,
-        },
+        createJsonRpcErrorResponse(
+          requestId!,
+          -32603,
+          "Internal server error setting up stream.",
+          undefined
+        ),
         500
       );
     }
@@ -444,21 +464,14 @@ app.post("/invoke", async (c) => {
       } else {
         jsonRpcErrorMessage = error.message || jsonRpcErrorMessage;
       }
-
       return c.json(
-        {
-          jsonrpc: "2.0",
-          error: {
-            code: jsonRpcErrorCode,
-            message: jsonRpcErrorMessage,
-            data:
-              config.server.environment === "development"
-                ? error.stack
-                : undefined,
-          },
-          id: requestId === undefined ? null : requestId,
-        },
-        500
+        createJsonRpcErrorResponse(
+          requestId!,
+          jsonRpcErrorCode,
+          jsonRpcErrorMessage,
+          config.server.environment === "development" ? error.stack : undefined
+        ),
+        jsonRpcErrorCode === -32602 ? 400 : 500
       );
     } finally {
       endToolMetricTracker();
@@ -469,20 +482,7 @@ app.post("/invoke", async (c) => {
 app.notFound(notFound);
 
 if (import.meta.main) {
-  registerToolsFromDirectory("./src/tools")
-    .then((count: number) => {
-      serverLogger.info(`Loaded ${count} tools from directory`);
-
-      const port = config.server.port;
-      console.log(`Server is running on port ${port}`);
-
-      serve({
-        fetch: app.fetch,
-        port,
-      });
-    })
-    .catch((error: Error) => {
-      serverLogger.error("Failed to load tools:", error);
-      process.exit(1);
-    });
+  //TODO: tool loading and Bun.serve call ...
 }
+
+export default app;
